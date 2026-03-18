@@ -1,0 +1,59 @@
+{
+  "name": "@operon/plugin-publisher-sdk",
+  "version": "0.1.0",
+  "description": "ElizaOS plugin for Operon - monetize agent responses with quality-weighted sponsored placements",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "lint": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@elizaos/core": ">=0.x"
+  },
+  "devDependencies": {
+    "@elizaos/core": "^0.1.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.0"
+  },
+  "agentConfig": {
+    "pluginType": "elizaos:plugin:1.0.0",
+    "pluginParameters": {
+      "OPERON_URL": {
+        "type": "string",
+        "required": true,
+        "description": "Operon network URL (e.g. https://api.operon.so)"
+      },
+      "OPERON_API_KEY": {
+        "type": "string",
+        "required": true,
+        "description": "Publisher API key from Operon"
+      }
+    }
+  },
+  "keywords": [
+    "elizaos",
+    "plugin",
+    "ai-agents",
+    "ad-network",
+    "operon",
+    "monetization"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yaooooooooooooooo/plugin-publisher-sdk"
+  },
+  "homepage": "https://operon.so"
+}
