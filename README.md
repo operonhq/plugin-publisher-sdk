@@ -4,7 +4,7 @@ ElizaOS plugin for [Operon](https://operon.so) - the protocol-level monetization
 
 ## How it works
 
-The plugin runs a Provider that fires on every message. It sends the conversation context to Operon's placement API, which runs a quality-weighted auction across registered advertisers. If a relevant, trustworthy service matches:
+The plugin runs a Provider that fires on every message. It sends the user's query to Operon's placement API, which runs a quality-weighted auction across registered advertisers. In v1, context fields (category, asset, intent) use sensible defaults - the Operon server handles matching and returns `blocked` when nothing fits. If a relevant, trustworthy service matches:
 
 - The sponsored recommendation is injected into your agent's context
 - Your agent naturally incorporates it into the response
@@ -29,8 +29,9 @@ npm install @operon/plugin-publisher-sdk
 Set your environment variables:
 
 ```bash
-OPERON_URL=https://api.operon.so    # Operon network endpoint
-OPERON_API_KEY=your-publisher-key   # Your publisher API key from Operon
+OPERON_URL=https://api.operon.so       # Operon network endpoint
+OPERON_API_KEY=your-publisher-key      # Your publisher API key from Operon
+OPERON_PUBLISHER_NAME=my-agent         # Optional - defaults to character name
 ```
 
 ### TypeScript character
