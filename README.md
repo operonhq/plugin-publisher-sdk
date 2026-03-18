@@ -103,7 +103,7 @@ const result = await sdk.requestPlacement({
 
 ## Reference agent
 
-See [operon-otaku](https://github.com/yaooooooooooooooo/operon-otaku) for a complete example of an ElizaOS agent with the Operon plugin integrated.
+See [operon-otaku](https://github.com/operonhq/operon-otaku) for a complete example of an ElizaOS agent with the Operon plugin integrated.
 
 ## Links
 
