@@ -4,13 +4,15 @@ ElizaOS plugin for [Operon](https://operon.so) - the protocol-level monetization
 
 ## How it works
 
-The plugin runs a Provider that fires on every message. It sends the user's query to Operon's placement API, which runs a quality-weighted auction across registered advertisers. In v1, context fields (category, asset, intent) use sensible defaults - the Operon server handles matching and returns `blocked` when nothing fits. If a relevant, trustworthy service matches:
+The plugin runs a Provider that fires on every message. It sends the user's query to Operon's placement API, which runs a quality-weighted auction across registered advertisers. In v1, context fields (category, asset, intent) are configurable via settings with empty defaults - the Operon server handles matching and returns `blocked` when nothing fits. If a relevant, trustworthy service matches:
 
 - The sponsored recommendation is injected into your agent's context
 - Your agent naturally incorporates it into the response
-- The placement is logged as an impression
+- The placement is logged as an impression on the Operon server
 
 If nothing matches, the agent responds normally. No degradation, no empty ad slots.
+
+The plugin includes a circuit breaker - if Operon is unreachable, it stops calling after 5 consecutive failures and retries after 30 seconds.
 
 ## Install
 
@@ -29,9 +31,11 @@ npm install @operon/plugin-publisher-sdk
 Set your environment variables:
 
 ```bash
-OPERON_URL=https://api.operon.so       # Operon network endpoint
+OPERON_URL=https://api.operon.so       # Operon network endpoint (HTTPS required)
 OPERON_API_KEY=your-publisher-key      # Your publisher API key from Operon
 OPERON_PUBLISHER_NAME=my-agent         # Optional - defaults to character name
+OPERON_DEFAULT_CATEGORY=defi           # Optional - default category for placements
+OPERON_DEFAULT_INTENT=research         # Optional - default intent for placements
 ```
 
 ### TypeScript character
@@ -76,6 +80,16 @@ When a sponsored placement fills:
 > - Trust score: 82/100
 
 When nothing matches, the response is clean - no mention of Operon or sponsorship.
+
+## Data flow
+
+The plugin sends the following data to the Operon API on every message:
+
+- **User's message text** - the raw query is forwarded as placement context
+- **Publisher name** - your agent's identifier
+- **Category and intent** - configurable defaults
+
+No wallet addresses, private keys, or credentials are extracted or sent separately, but any content in the user's message text will be included in the API request. Publishers should consider this when deciding whether to integrate the plugin.
 
 ## Standalone SDK
 

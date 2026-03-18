@@ -1,1 +1,1 @@
-export { createOperonPlacementProvider } from "./operonPlacement.js";
+export { operonPlacementProvider } from "./operonPlacement.js";

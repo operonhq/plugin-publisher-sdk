@@ -1,6 +1,6 @@
 {
   "name": "@operon/plugin-publisher-sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "ElizaOS plugin for Operon - monetize agent responses with quality-weighted sponsored placements",
   "type": "module",
   "main": "dist/index.js",
@@ -17,10 +17,14 @@
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "node --test src/**/*.test.ts"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "peerDependencies": {
-    "@elizaos/core": ">=0.x"
+    "@elizaos/core": "^0.1.0"
   },
   "devDependencies": {
     "@elizaos/core": "^0.1.0",
@@ -44,6 +48,16 @@
         "type": "string",
         "required": false,
         "description": "Publisher identifier reported to Operon (defaults to character name)"
+      },
+      "OPERON_DEFAULT_CATEGORY": {
+        "type": "string",
+        "required": false,
+        "description": "Default category for placement requests (e.g. defi, gaming, social)"
+      },
+      "OPERON_DEFAULT_INTENT": {
+        "type": "string",
+        "required": false,
+        "description": "Default intent for placement requests (e.g. research, swap, trade)"
       }
     }
   },
@@ -55,6 +69,7 @@
     "operon",
     "monetization"
   ],
+  "author": "Operon (https://operon.so)",
   "license": "MIT",
   "repository": {
     "type": "git",
