@@ -22,6 +22,19 @@ export function clampNumber(val: unknown, min: number, max: number): number {
   return Math.max(min, Math.min(max, val));
 }
 
+/** Validate a URL string, allowing only http/https protocols */
+function sanitizeUrl(val: unknown, maxLen: number): string {
+  const s = clampString(val, maxLen);
+  if (!s) return "";
+  try {
+    const url = new URL(s);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return "";
+    return s;
+  } catch {
+    return "";
+  }
+}
+
 const MAX_RANKING_ENTRIES = 50;
 
 /** Validate and sanitize an AuctionResult from untrusted server data */
@@ -49,12 +62,12 @@ export function validateAuction(raw: unknown): AuctionResult {
       return {
         service: clampString(e.service, 100),
         score: clampNumber(e.score, 0, 100),
-        bid: clampNumber(e.bid, 0, Infinity),
+        bid: clampNumber(e.bid, 0, 1_000_000),
         rank: clampNumber(e.rank, 0, 10_000),
         eligible: !!e.eligible,
         reason: clampString(e.reason, 200),
       };
-    }),
+    }).filter(entry => entry.service !== ""),
   };
 }
 
@@ -77,11 +90,11 @@ export function validatePlacement(raw: unknown): PlacementDetails {
     category: clampString(p.category, 100),
     description: clampString(p.description),
     routable: !!p.routable,
-    endpoint: clampString(p.endpoint, 200),
+    endpoint: sanitizeUrl(p.endpoint, 200),
     scoutScore: clampNumber(p.scoutScore, 0, 100),
     // Range [0, 10_000] matches the auction ranking entries; should match the server's API contract
     rank: clampNumber(p.rank, 0, 10_000),
-    bidPrice: clampNumber(p.bidPrice, 0, Infinity),
+    bidPrice: clampNumber(p.bidPrice, 0, 1_000_000),
   };
 }
 

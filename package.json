@@ -18,7 +18,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "lint": "tsc --noEmit",
-    "test": "node --test src/**/*.test.ts"
+    "test": "node --import tsx --test src/client.test.ts src/providers/operonPlacement.test.ts"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -29,6 +29,7 @@
   "devDependencies": {
     "@elizaos/core": "^0.1.0",
     "tsup": "^8.3.5",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.0"
   },
   "agentConfig": {
