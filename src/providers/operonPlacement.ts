@@ -26,20 +26,30 @@ function ensureSDK(runtime: IAgentRuntime): OperonPublisherSDK | null {
   }
 
   if (!url.startsWith("https://") && !url.startsWith("http://localhost")) {
-    console.warn(
-      `[operon-publisher] OPERON_URL should use HTTPS. Got: ${new URL(url).protocol}. Continuing, but credentials may be exposed.`
-    );
+    if (runtime.getSetting("OPERON_ALLOW_HTTP") === "true") {
+      console.warn(
+        `[operon-publisher] OPERON_URL is not HTTPS (${new URL(url).protocol}). OPERON_ALLOW_HTTP is set — continuing, but credentials may be exposed.`
+      );
+    } else {
+      console.error(
+        `[operon-publisher] OPERON_URL must use HTTPS in production (got ${new URL(url).protocol}). Set OPERON_ALLOW_HTTP=true to override. Plugin disabled.`
+      );
+      sdkCache.set(runtime, false);
+      return null;
+    }
   }
 
   const instance = createOperonPublisherSDK(url.trim(), key.trim());
   sdkCache.set(runtime, instance);
 
   // Log hostname only, not full URL (avoids leaking query params)
-  try {
-    const hostname = new URL(url).hostname;
-    console.log(`[operon-publisher] Connected to ${hostname}`);
-  } catch {
-    console.log("[operon-publisher] Connected");
+  if (runtime.getSetting("OPERON_DEBUG") === "true") {
+    try {
+      const hostname = new URL(url).hostname;
+      console.log(`[operon-publisher] Connected to ${hostname}`);
+    } catch {
+      console.log("[operon-publisher] Connected");
+    }
   }
 
   return instance;
