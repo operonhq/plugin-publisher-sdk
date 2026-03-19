@@ -192,6 +192,8 @@ function formatPlacement(placement: PlacementDetails): string {
  * forwarded to Operon's servers for placement matching.
  */
 export const operonPlacementProvider: Provider = {
+  name: "OPERON_PLACEMENT",
+  description: "Sponsored placement from Operon ad network - injects quality-gated sponsored content into agent responses",
   get: async (
     runtime: IAgentRuntime,
     message: Memory,
