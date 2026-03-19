@@ -49,42 +49,54 @@ function ensureSDK(runtime: IAgentRuntime): OperonPublisherSDK | null {
 // Circuit breaker - stops hammering Operon when it's down
 // ---------------------------------------------------------------------------
 
-const CIRCUIT_FAILURE_THRESHOLD = 5;
-const CIRCUIT_COOLDOWN_MS = 30_000;
+export const CIRCUIT_FAILURE_THRESHOLD = 5;
+export const CIRCUIT_COOLDOWN_MS = 30_000;
 
 interface CircuitState {
   failures: number;
   openUntil: number;
+  halfOpen: boolean;
 }
 
 const circuitStates = new WeakMap<IAgentRuntime, CircuitState>();
 
-function getCircuit(runtime: IAgentRuntime): CircuitState {
+export function getCircuit(runtime: IAgentRuntime): CircuitState {
   let state = circuitStates.get(runtime);
   if (!state) {
-    state = { failures: 0, openUntil: 0 };
+    state = { failures: 0, openUntil: 0, halfOpen: false };
     circuitStates.set(runtime, state);
   }
   return state;
 }
 
-function isCircuitOpen(circuit: CircuitState): boolean {
+export function isCircuitOpen(circuit: CircuitState): boolean {
   if (circuit.failures < CIRCUIT_FAILURE_THRESHOLD) return false;
   if (Date.now() > circuit.openUntil) {
-    // Reset after cooldown - allow a retry
-    circuit.failures = 0;
+    if (circuit.halfOpen) return true; // probe already in flight
+    // Cooldown expired - enter half-open state and allow a single probe
+    circuit.halfOpen = true;
     return false;
   }
   return true;
 }
 
-function recordSuccess(circuit: CircuitState): void {
+export function recordSuccess(circuit: CircuitState): void {
   circuit.failures = 0;
+  circuit.halfOpen = false;
+  circuit.openUntil = 0;
 }
 
-function recordFailure(circuit: CircuitState): void {
-  circuit.failures++;
-  if (circuit.failures >= CIRCUIT_FAILURE_THRESHOLD) {
+export function recordFailure(circuit: CircuitState): void {
+  if (circuit.halfOpen) {
+    // Half-open probe failed - re-open circuit immediately
+    circuit.halfOpen = false;
+    circuit.openUntil = Date.now() + CIRCUIT_COOLDOWN_MS;
+    return;
+  }
+  if (circuit.failures < CIRCUIT_FAILURE_THRESHOLD) {
+    circuit.failures++;
+  }
+  if (circuit.failures >= CIRCUIT_FAILURE_THRESHOLD && circuit.openUntil < Date.now()) {
     circuit.openUntil = Date.now() + CIRCUIT_COOLDOWN_MS;
   }
 }

@@ -1,4 +1,4 @@
-import type { ImpressionContext, OperonPlacementResponse, PlacementDetails } from "./types.js";
+import type { AuctionResult, ImpressionContext, OperonPlacementResponse, PlacementDetails } from "./types.js";
 
 export interface OperonPublisherSDK {
   requestPlacement(
@@ -11,19 +11,55 @@ const MAX_STRING_FIELD_LENGTH = 500;
 const MAX_ERROR_BODY_LENGTH = 200;
 
 /** Clamp a string field to a safe length */
-function clampString(val: unknown, maxLen = MAX_STRING_FIELD_LENGTH): string {
+export function clampString(val: unknown, maxLen = MAX_STRING_FIELD_LENGTH): string {
   if (typeof val !== "string") return "";
   return val.slice(0, maxLen);
 }
 
 /** Clamp a number to a safe range */
-function clampNumber(val: unknown, min: number, max: number): number {
+export function clampNumber(val: unknown, min: number, max: number): number {
   if (typeof val !== "number" || !Number.isFinite(val)) return 0;
   return Math.max(min, Math.min(max, val));
 }
 
+const MAX_RANKING_ENTRIES = 50;
+
+/** Validate and sanitize an AuctionResult from untrusted server data */
+export function validateAuction(raw: unknown): AuctionResult {
+  if (raw === undefined || raw === null) {
+    return { candidates: 0, eligible: 0, winner: "", ranking: [] };
+  }
+  if (typeof raw !== "object") {
+    console.warn("[operon-publisher] Auction data present but invalid (not an object)");
+    return { candidates: 0, eligible: 0, winner: "", ranking: [] };
+  }
+
+  const a = raw as Record<string, unknown>;
+
+  const rawRanking = Array.isArray(a.ranking)
+    ? a.ranking.slice(0, MAX_RANKING_ENTRIES)
+    : [];
+
+  return {
+    candidates: clampNumber(a.candidates, 0, 10_000),
+    eligible: clampNumber(a.eligible, 0, 10_000),
+    winner: clampString(a.winner, 100),
+    ranking: rawRanking.map((entry: unknown) => {
+      const e = (entry && typeof entry === "object" ? entry : {}) as Record<string, unknown>;
+      return {
+        service: clampString(e.service, 100),
+        score: clampNumber(e.score, 0, 100),
+        bid: clampNumber(e.bid, 0, Infinity),
+        rank: clampNumber(e.rank, 0, 10_000),
+        eligible: !!e.eligible,
+        reason: clampString(e.reason, 200),
+      };
+    }),
+  };
+}
+
 /** Validate and sanitize a PlacementDetails object from untrusted server data */
-function validatePlacement(raw: unknown): PlacementDetails {
+export function validatePlacement(raw: unknown): PlacementDetails {
   if (!raw || typeof raw !== "object") {
     throw new Error("Operon returned filled decision without valid placement data");
   }
@@ -43,7 +79,8 @@ function validatePlacement(raw: unknown): PlacementDetails {
     routable: !!p.routable,
     endpoint: clampString(p.endpoint, 200),
     scoutScore: clampNumber(p.scoutScore, 0, 100),
-    rank: clampNumber(p.rank, 0, 1),
+    // Range [0, 10_000] matches the auction ranking entries; should match the server's API contract
+    rank: clampNumber(p.rank, 0, 10_000),
     bidPrice: clampNumber(p.bidPrice, 0, Infinity),
   };
 }
@@ -88,9 +125,7 @@ export function createOperonPublisherSDK(
 
       if (obj.decision === "filled") {
         const placement = validatePlacement(obj.placement);
-        const auction = obj.auction && typeof obj.auction === "object"
-          ? obj.auction as OperonPlacementResponse extends { decision: "filled"; auction: infer A } ? A : never
-          : { candidates: 0, eligible: 0, winner: "", ranking: [] };
+        const auction = validateAuction(obj.auction);
 
         return {
           decision: "filled",
