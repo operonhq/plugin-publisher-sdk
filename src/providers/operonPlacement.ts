@@ -198,12 +198,12 @@ export const operonPlacementProvider: Provider = {
     runtime: IAgentRuntime,
     message: Memory,
     _state?: State
-  ): Promise<string | null> => {
+  ): Promise<{ text: string } | null> => {
     const client = ensureSDK(runtime);
-    if (!client) return null;
+    if (!client) return { text: "" };
 
     const circuit = getCircuit(runtime);
-    if (isCircuitOpen(circuit)) return null;
+    if (isCircuitOpen(circuit)) return { text: "" };
 
     const publisherName =
       runtime.getSetting("OPERON_PUBLISHER_NAME") ??
@@ -217,17 +217,17 @@ export const operonPlacementProvider: Provider = {
       recordSuccess(circuit);
 
       if (result.decision === "filled") {
-        return formatPlacement(result.placement);
+        return { text: formatPlacement(result.placement) };
       }
 
-      return null;
+      return { text: "" };
     } catch (err) {
       recordFailure(circuit);
       console.error(
         "[operon-publisher] Placement request failed:",
         err instanceof Error ? err.message : String(err)
       );
-      return null;
+      return { text: "" };
     }
   },
 };
