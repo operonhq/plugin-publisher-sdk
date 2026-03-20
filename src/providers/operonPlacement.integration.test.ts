@@ -91,47 +91,48 @@ describe("operonPlacementProvider.get() integration", () => {
     mock.restoreAll();
   });
 
-  it("returns formatted placement string when server returns filled", async () => {
+  it("returns ProviderResult with placement text when server returns filled", async () => {
     globalThis.fetch = mock.fn(async () => filledResponse()) as unknown as typeof fetch;
 
     const result = await operonPlacementProvider.get(runtime, message);
 
-    assert.ok(result, "Expected a non-null placement string");
-    assert.ok(result.includes("[SPONSORED_CONTENT_START]"));
-    assert.ok(result.includes("TestService"));
-    assert.ok(result.includes("[SPONSORED_CONTENT_END]"));
+    assert.ok(result, "Expected a non-null result");
+    assert.ok(typeof result === "object" && "text" in result, "Expected { text: string }");
+    assert.ok(result.text.includes("[SPONSORED_CONTENT_START]"));
+    assert.ok(result.text.includes("TestService"));
+    assert.ok(result.text.includes("[SPONSORED_CONTENT_END]"));
   });
 
-  it("returns null when server returns blocked", async () => {
+  it("returns empty text when server returns blocked", async () => {
     globalThis.fetch = mock.fn(async () => blockedResponse()) as unknown as typeof fetch;
 
     const result = await operonPlacementProvider.get(runtime, message);
 
-    assert.equal(result, null);
+    assert.deepEqual(result, { text: "" });
   });
 
-  it("returns null on network error (graceful degradation)", async () => {
+  it("returns empty text on network error (graceful degradation)", async () => {
     globalThis.fetch = mock.fn(async () => {
       throw new Error("Network unreachable");
     }) as unknown as typeof fetch;
 
     const result = await operonPlacementProvider.get(runtime, message);
 
-    assert.equal(result, null);
+    assert.deepEqual(result, { text: "" });
   });
 
-  it("returns null when config is missing (OPERON_URL not set)", async () => {
+  it("returns empty text when config is missing (OPERON_URL not set)", async () => {
     const badRuntime = makeRuntime({ OPERON_URL: null });
     globalThis.fetch = mock.fn(async () => filledResponse()) as unknown as typeof fetch;
 
     const result = await operonPlacementProvider.get(badRuntime, message);
 
-    assert.equal(result, null);
+    assert.deepEqual(result, { text: "" });
     // fetch should never have been called
     assert.equal((globalThis.fetch as unknown as ReturnType<typeof mock.fn>).mock.callCount(), 0);
   });
 
-  it("circuit breaker: returns null after repeated failures without making more requests", async () => {
+  it("circuit breaker: returns empty text after repeated failures without making more requests", async () => {
     const callCount = { value: 0 };
     globalThis.fetch = mock.fn(async () => {
       callCount.value++;
@@ -147,7 +148,7 @@ describe("operonPlacementProvider.get() integration", () => {
 
     // Subsequent calls should not make any fetch requests
     const result = await operonPlacementProvider.get(runtime, message);
-    assert.equal(result, null);
+    assert.deepEqual(result, { text: "" });
     assert.equal(callCount.value, countAfterOpening, "No additional fetch calls after circuit opens");
   });
 });
