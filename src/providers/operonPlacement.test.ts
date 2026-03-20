@@ -32,6 +32,15 @@ describe("Circuit breaker state machine", () => {
     assert.equal(isCircuitOpen(circuit), false);
   });
 
+  it("stays closed below the failure threshold", () => {
+    const circuit = getCircuit(runtime);
+    for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD - 1; i++) {
+      recordFailure(circuit);
+      assert.equal(isCircuitOpen(circuit), false, `should stay closed at ${i + 1} failures`);
+    }
+    assert.equal(circuit.failures, CIRCUIT_FAILURE_THRESHOLD - 1);
+  });
+
   it("opens after reaching the failure threshold", () => {
     const circuit = getCircuit(runtime);
     for (let i = 0; i < CIRCUIT_FAILURE_THRESHOLD; i++) {
@@ -39,6 +48,16 @@ describe("Circuit breaker state machine", () => {
     }
     assert.equal(circuit.failures, CIRCUIT_FAILURE_THRESHOLD);
     assert.equal(isCircuitOpen(circuit), true);
+  });
+
+  it("increments failures one at a time", () => {
+    const circuit = getCircuit(runtime);
+    recordFailure(circuit);
+    assert.equal(circuit.failures, 1);
+    recordFailure(circuit);
+    assert.equal(circuit.failures, 2);
+    recordFailure(circuit);
+    assert.equal(circuit.failures, 3);
   });
 
   it("blocks requests while open", () => {

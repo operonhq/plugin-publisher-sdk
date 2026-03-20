@@ -97,10 +97,10 @@ export function recordSuccess(circuit: CircuitState): void {
 }
 
 export function recordFailure(circuit: CircuitState): void {
-  circuit.failures = Math.max(circuit.failures, CIRCUIT_FAILURE_THRESHOLD);
   if (circuit.halfOpen) {
     // Half-open probe failed - re-open circuit immediately
     circuit.halfOpen = false;
+    circuit.failures = CIRCUIT_FAILURE_THRESHOLD;
     circuit.openUntil = Date.now() + CIRCUIT_COOLDOWN_MS;
     return;
   }

@@ -188,9 +188,9 @@ function recordSuccess(circuit) {
   circuit.openUntil = 0;
 }
 function recordFailure(circuit) {
-  circuit.failures = Math.max(circuit.failures, CIRCUIT_FAILURE_THRESHOLD);
   if (circuit.halfOpen) {
     circuit.halfOpen = false;
+    circuit.failures = CIRCUIT_FAILURE_THRESHOLD;
     circuit.openUntil = Date.now() + CIRCUIT_COOLDOWN_MS;
     return;
   }
