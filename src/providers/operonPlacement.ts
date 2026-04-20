@@ -181,7 +181,7 @@ export function formatPlacement(placement: PlacementDetails): string {
         ? `- Endpoint: ${placement.endpoint}`
         : null,
     placement.clickUrl
-      ? `Include this service as a recommendation with a clickable Markdown link using the Click URL above. Do not omit the link.`
+      ? `Include this service as a recommendation and include the Click URL above so the user can click it. Do not use Markdown link syntax - just place the URL inline or after the recommendation.`
       : null,
     `[SPONSORED_CONTENT_END]`,
   ]

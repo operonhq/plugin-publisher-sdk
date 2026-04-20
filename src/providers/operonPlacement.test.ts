@@ -157,7 +157,7 @@ describe("formatPlacement", () => {
     assert.ok(result.includes("[SPONSORED_CONTENT_END]"));
     assert.ok(result.includes("ChangeNOW"));
     assert.ok(result.includes("- Click URL: https://api.operon.so/c/imp_abc123"));
-    assert.ok(result.includes("clickable Markdown link"));
+    assert.ok(result.includes("Click URL above so the user can click it"));
     // Should NOT include endpoint when clickUrl is present
     assert.ok(!result.includes("- Endpoint:"));
     // scoutScore: 0 should still emit trust score line (!= null guard, not falsy check)
@@ -170,7 +170,7 @@ describe("formatPlacement", () => {
 
     assert.ok(result.includes("- Endpoint: https://example.com/api"));
     assert.ok(!result.includes("- Click URL:"));
-    assert.ok(!result.includes("clickable Markdown link"));
+    assert.ok(!result.includes("Click URL above so the user can click it"));
   });
 
   it("includes no URL line when clickUrl is null and not routable", () => {
@@ -179,7 +179,7 @@ describe("formatPlacement", () => {
 
     assert.ok(!result.includes("- Click URL:"));
     assert.ok(!result.includes("- Endpoint:"));
-    assert.ok(!result.includes("clickable Markdown link"));
+    assert.ok(!result.includes("Click URL above so the user can click it"));
     // Should still have the basic structure
     assert.ok(result.includes("[SPONSORED_CONTENT_START]"));
     assert.ok(result.includes("ChangeNOW"));

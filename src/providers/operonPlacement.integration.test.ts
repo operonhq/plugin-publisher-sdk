@@ -141,7 +141,7 @@ describe("operonPlacementProvider.get() integration", () => {
     assert.ok(result, "Expected a non-null result");
     assert.ok(typeof result === "object" && "text" in result, "Expected { text: string }");
     assert.ok(result.text.includes("- Click URL: https://api.operon.so/c/imp_test123"), "Should include clickUrl");
-    assert.ok(result.text.includes("clickable Markdown link"), "Should include Markdown instruction");
+    assert.ok(result.text.includes("Click URL above so the user can click it"), "Should include Markdown instruction");
     assert.ok(!result.text.includes("- Endpoint:"), "Should not include endpoint for campaign-type");
   });
 
