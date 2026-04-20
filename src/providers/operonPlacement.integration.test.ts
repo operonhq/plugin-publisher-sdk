@@ -60,6 +60,36 @@ function filledResponse(service = "TestService") {
   };
 }
 
+function filledCampaignResponse(service = "ChangeNOW") {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      decision: "filled",
+      reason: "matched",
+      placement: {
+        sponsored: true,
+        service,
+        serviceType: "crypto_swap",
+        category: "defi",
+        description: "Non-custodial swaps for 1000+ coins",
+        routable: false,
+        endpoint: null,
+        clickUrl: "https://api.operon.so/c/imp_test123",
+        scoutScore: 0,
+        rank: 1,
+        bidPrice: 200,
+      },
+      auction: {
+        candidates: 2,
+        eligible: 2,
+        winner: service,
+        ranking: [],
+      },
+    }),
+  };
+}
+
 function blockedResponse() {
   return {
     ok: true,
@@ -101,6 +131,18 @@ describe("operonPlacementProvider.get() integration", () => {
     assert.ok(result.text.includes("[SPONSORED_CONTENT_START]"));
     assert.ok(result.text.includes("TestService"));
     assert.ok(result.text.includes("[SPONSORED_CONTENT_END]"));
+  });
+
+  it("includes clickUrl and Markdown instruction for campaign-type placements", async () => {
+    globalThis.fetch = mock.fn(async () => filledCampaignResponse()) as unknown as typeof fetch;
+
+    const result = await operonPlacementProvider.get(runtime, message);
+
+    assert.ok(result, "Expected a non-null result");
+    assert.ok(typeof result === "object" && "text" in result, "Expected { text: string }");
+    assert.ok(result.text.includes("- Click URL: https://api.operon.so/c/imp_test123"), "Should include clickUrl");
+    assert.ok(result.text.includes("clickable Markdown link"), "Should include Markdown instruction");
+    assert.ok(!result.text.includes("- Endpoint:"), "Should not include endpoint for campaign-type");
   });
 
   it("returns empty text when server returns blocked", async () => {

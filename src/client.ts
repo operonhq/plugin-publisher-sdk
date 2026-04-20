@@ -10,10 +10,10 @@ const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_STRING_FIELD_LENGTH = 500;
 const MAX_ERROR_BODY_LENGTH = 200;
 
-/** Clamp a string field to a safe length */
+/** Clamp a string field to a safe length, stripping control characters */
 export function clampString(val: unknown, maxLen = MAX_STRING_FIELD_LENGTH): string {
   if (typeof val !== "string") return "";
-  return val.slice(0, maxLen);
+  return val.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]/g, "").slice(0, maxLen);
 }
 
 /** Clamp a number to a safe range */
@@ -22,17 +22,27 @@ export function clampNumber(val: unknown, min: number, max: number): number {
   return Math.max(min, Math.min(max, val));
 }
 
-/** Validate a URL string, allowing only http/https protocols */
+/** Validate and normalize a URL string, allowing only http/https protocols */
 function sanitizeUrl(val: unknown, maxLen: number): string {
   const s = clampString(val, maxLen);
   if (!s) return "";
   try {
     const url = new URL(s);
     if (url.protocol !== "https:" && url.protocol !== "http:") return "";
-    return s;
+    if (url.username || url.password) return "";
+    return url.href;
   } catch {
     return "";
   }
+}
+
+/** Sanitize a clickUrl, warning when a non-empty value is rejected */
+function sanitizeClickUrl(val: unknown): string | null {
+  const sanitized = sanitizeUrl(val, 500);
+  if (val && typeof val === "string" && val.trim() && !sanitized) {
+    console.warn(`[operon-publisher] clickUrl rejected by sanitizeUrl: ${val.slice(0, 80).replace(/[\r\n\t]/g, " ")}`);
+  }
+  return sanitized || null;
 }
 
 const MAX_RANKING_ENTRIES = 50;
@@ -91,7 +101,8 @@ export function validatePlacement(raw: unknown): PlacementDetails {
     description: clampString(p.description),
     routable: !!p.routable,
     endpoint: sanitizeUrl(p.endpoint, 200),
-    scoutScore: clampNumber(p.scoutScore, 0, 100),
+    clickUrl: sanitizeClickUrl(p.clickUrl),
+    scoutScore: p.scoutScore != null ? clampNumber(p.scoutScore, 0, 100) : null,
     // Range [0, 10_000] matches the auction ranking entries; should match the server's API contract
     rank: clampNumber(p.rank, 0, 10_000),
     bidPrice: clampNumber(p.bidPrice, 0, 1_000_000),
@@ -102,6 +113,19 @@ export function createOperonPublisherSDK(
   operonUrl: string,
   apiKey: string
 ): OperonPublisherSDK {
+  // Validate URL at construction time so callers bypassing ensureSDK still get safety checks
+  let parsed: URL;
+  try {
+    parsed = new URL(operonUrl);
+  } catch {
+    throw new Error(`[operon-publisher] Invalid OPERON_URL: ${clampString(operonUrl, 80)}`);
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error(`[operon-publisher] OPERON_URL must use http or https (got ${parsed.protocol})`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("[operon-publisher] OPERON_URL must not contain credentials");
+  }
   const baseUrl = operonUrl.replace(/\/+$/, "");
 
   return {

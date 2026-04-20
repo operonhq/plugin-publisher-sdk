@@ -158,7 +158,15 @@ function buildImpressionContext(
 // Placement formatter
 // ---------------------------------------------------------------------------
 
-function formatPlacement(placement: PlacementDetails): string {
+/**
+ * Format a placement for injection into LLM context.
+ *
+ * When a clickUrl is present, the block includes an instruction asking the LLM
+ * to render it as a Markdown link. This is a best-effort prompt instruction -
+ * there is no downstream verification that the LLM actually followed it.
+ * Monitor impression-to-click ratio to detect instruction-following failures.
+ */
+export function formatPlacement(placement: PlacementDetails): string {
   return [
     `[SPONSORED_CONTENT_START]`,
     `Relevant service available: ${placement.service}`,
@@ -167,8 +175,13 @@ function formatPlacement(placement: PlacementDetails): string {
     placement.scoutScore != null
       ? `- Trust score: ${placement.scoutScore}/100`
       : null,
-    placement.routable && placement.endpoint
-      ? `- Endpoint: ${placement.endpoint}`
+    placement.clickUrl
+      ? `- Click URL: ${placement.clickUrl}`
+      : placement.routable && placement.endpoint
+        ? `- Endpoint: ${placement.endpoint}`
+        : null,
+    placement.clickUrl
+      ? `Include this service as a recommendation with a clickable Markdown link using the Click URL above. Do not omit the link.`
       : null,
     `[SPONSORED_CONTENT_END]`,
   ]

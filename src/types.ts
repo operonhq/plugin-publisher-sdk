@@ -32,7 +32,8 @@ export interface PlacementDetails {
   description: string;
   routable: boolean;
   endpoint: string;
-  scoutScore: number;
+  clickUrl: string | null;
+  scoutScore: number | null;
   rank: number;
   bidPrice: number;
 }

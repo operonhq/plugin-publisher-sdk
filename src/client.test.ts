@@ -18,6 +18,18 @@ describe("clampString", () => {
   it("truncates to the specified max length", () => {
     assert.equal(clampString("abcdef", 3), "abc");
   });
+
+  it("strips control characters and Unicode direction overrides", () => {
+    assert.equal(clampString("hello\x00world"), "helloworld");
+    assert.equal(clampString("safe\u202Emalicious"), "safemalicious");
+    assert.equal(clampString("zero\u200Bwidth"), "zerowidth");
+    assert.equal(clampString("normal text"), "normal text");
+  });
+
+  it("preserves tabs and newlines", () => {
+    assert.equal(clampString("line1\nline2"), "line1\nline2");
+    assert.equal(clampString("col1\tcol2"), "col1\tcol2");
+  });
 });
 
 describe("clampNumber", () => {
@@ -61,6 +73,17 @@ describe("validatePlacement", () => {
     assert.equal(result.service, "test-service");
     assert.equal(result.sponsored, true);
     assert.equal(result.rank, 42);
+    assert.equal(result.scoutScore, 85);
+  });
+
+  it("returns null scoutScore when server sends null", () => {
+    const result = validatePlacement({ ...validInput, scoutScore: null });
+    assert.equal(result.scoutScore, null);
+  });
+
+  it("returns null scoutScore when server sends undefined", () => {
+    const result = validatePlacement({ ...validInput, scoutScore: undefined });
+    assert.equal(result.scoutScore, null);
   });
 
   it("throws when input is null or not an object", () => {
@@ -72,6 +95,57 @@ describe("validatePlacement", () => {
   it("throws when service is missing", () => {
     assert.throws(() => validatePlacement({ ...validInput, service: "" }));
     assert.throws(() => validatePlacement({ ...validInput, service: 123 }));
+  });
+
+  it("passes through a valid HTTPS clickUrl", () => {
+    const result = validatePlacement({ ...validInput, clickUrl: "https://api.operon.so/c/imp_abc123" });
+    assert.equal(result.clickUrl, "https://api.operon.so/c/imp_abc123");
+  });
+
+  it("returns null for missing or undefined clickUrl", () => {
+    const result = validatePlacement(validInput);
+    assert.equal(result.clickUrl, null);
+
+    const result2 = validatePlacement({ ...validInput, clickUrl: undefined });
+    assert.equal(result2.clickUrl, null);
+
+    const result3 = validatePlacement({ ...validInput, clickUrl: null });
+    assert.equal(result3.clickUrl, null);
+  });
+
+  it("rejects javascript: protocol clickUrl", () => {
+    const result = validatePlacement({ ...validInput, clickUrl: "javascript:alert(1)" });
+    assert.equal(result.clickUrl, null);
+  });
+
+  it("rejects data: protocol clickUrl", () => {
+    const result = validatePlacement({ ...validInput, clickUrl: "data:text/html,<h1>hi</h1>" });
+    assert.equal(result.clickUrl, null);
+  });
+
+  it("rejects ftp: protocol clickUrl", () => {
+    const result = validatePlacement({ ...validInput, clickUrl: "ftp://example.com/file" });
+    assert.equal(result.clickUrl, null);
+  });
+
+  it("rejects malformed clickUrl", () => {
+    const result = validatePlacement({ ...validInput, clickUrl: "not-a-url" });
+    assert.equal(result.clickUrl, null);
+  });
+
+  it("allows http clickUrl", () => {
+    const result = validatePlacement({ ...validInput, clickUrl: "http://localhost:3000/c/imp_test" });
+    assert.equal(result.clickUrl, "http://localhost:3000/c/imp_test");
+  });
+
+  it("rejects clickUrl with embedded credentials", () => {
+    const result = validatePlacement({ ...validInput, clickUrl: "https://admin:secret@evil.com/" });
+    assert.equal(result.clickUrl, null);
+  });
+
+  it("rejects endpoint with embedded credentials", () => {
+    const result = validatePlacement({ ...validInput, endpoint: "https://user:pass@evil.com/api" });
+    assert.equal(result.endpoint, "");
   });
 });
 
