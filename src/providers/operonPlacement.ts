@@ -3,6 +3,24 @@ import { createOperonPublisherSDK, type OperonPublisherSDK } from "../client.js"
 import type { ImpressionContext, PlacementDetails } from "../types.js";
 
 // ---------------------------------------------------------------------------
+// Settings resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Read a setting, accepting both the legacy and new names. New names from
+ * the v0.2.0 mapping table (OPERON_API_URL, OPERON_CATEGORY, OPERON_INTENT)
+ * are checked first; legacy names (OPERON_URL, OPERON_DEFAULT_CATEGORY,
+ * OPERON_DEFAULT_INTENT) fall through so existing characters keep working.
+ */
+function getSetting(runtime: IAgentRuntime, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const v = runtime.getSetting(key);
+    if (v != null && String(v).trim() !== "") return String(v);
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Per-runtime SDK cache
 // ---------------------------------------------------------------------------
 
@@ -14,39 +32,52 @@ function ensureSDK(runtime: IAgentRuntime): OperonPublisherSDK | null {
     return cached === false ? null : (cached as OperonPublisherSDK);
   }
 
-  const url = runtime.getSetting("OPERON_URL");
-  const key = runtime.getSetting("OPERON_API_KEY");
-
-  if (!url || !key || !url.trim() || !key.trim()) {
+  const url = getSetting(runtime, "OPERON_API_URL", "OPERON_URL");
+  if (!url) {
     console.warn(
-      "[operon-publisher] OPERON_URL and OPERON_API_KEY are required. Plugin disabled for this runtime."
+      "[operon-publisher] OPERON_API_URL (or legacy OPERON_URL) is required. Plugin disabled for this runtime."
     );
     sdkCache.set(runtime, false);
     return null;
   }
 
-  if (!url.startsWith("https://") && !url.startsWith("http://localhost")) {
+  // OPERON_API_KEY is optional - omitting it puts the SDK into sandbox mode
+  // (no auth required, server mints a client UUID for attribution).
+  const key = getSetting(runtime, "OPERON_API_KEY") ?? undefined;
+
+  const trimmedUrl = url.trim();
+  if (!trimmedUrl.startsWith("https://") && !trimmedUrl.startsWith("http://localhost")) {
     if (runtime.getSetting("OPERON_ALLOW_HTTP") === "true") {
       console.warn(
-        `[operon-publisher] OPERON_URL is not HTTPS (${new URL(url).protocol}). OPERON_ALLOW_HTTP is set — continuing, but credentials may be exposed.`
+        `[operon-publisher] url is not HTTPS (${new URL(trimmedUrl).protocol}). OPERON_ALLOW_HTTP is set — continuing, but credentials may be exposed.`
       );
     } else {
       console.error(
-        `[operon-publisher] OPERON_URL must use HTTPS in production (got ${new URL(url).protocol}). Set OPERON_ALLOW_HTTP=true to override. Plugin disabled.`
+        `[operon-publisher] url must use HTTPS in production (got ${new URL(trimmedUrl).protocol}). Set OPERON_ALLOW_HTTP=true to override. Plugin disabled.`
       );
       sdkCache.set(runtime, false);
       return null;
     }
   }
 
-  const instance = createOperonPublisherSDK(url.trim(), key.trim());
+  const publisherName =
+    getSetting(runtime, "OPERON_PUBLISHER_NAME") ??
+    runtime.character?.name ??
+    undefined;
+  const source = getSetting(runtime, "OPERON_SOURCE") ?? undefined;
+
+  const instance = createOperonPublisherSDK({
+    url: trimmedUrl,
+    apiKey: key?.trim(),
+    publisherName,
+    source,
+  });
   sdkCache.set(runtime, instance);
 
-  // Log hostname only, not full URL (avoids leaking query params)
   if (runtime.getSetting("OPERON_DEBUG") === "true") {
     try {
-      const hostname = new URL(url).hostname;
-      console.log(`[operon-publisher] Connected to ${hostname}`);
+      const hostname = new URL(trimmedUrl).hostname;
+      console.log(`[operon-publisher] Connected to ${hostname}${key ? "" : " (sandbox)"}`);
     } catch {
       console.log("[operon-publisher] Connected");
     }
@@ -56,73 +87,16 @@ function ensureSDK(runtime: IAgentRuntime): OperonPublisherSDK | null {
 }
 
 // ---------------------------------------------------------------------------
-// Circuit breaker - stops hammering Operon when it's down
-// ---------------------------------------------------------------------------
-
-export const CIRCUIT_FAILURE_THRESHOLD = 5;
-export const CIRCUIT_COOLDOWN_MS = 30_000;
-
-interface CircuitState {
-  failures: number;
-  openUntil: number;
-  halfOpen: boolean;
-}
-
-const circuitStates = new WeakMap<IAgentRuntime, CircuitState>();
-
-export function getCircuit(runtime: IAgentRuntime): CircuitState {
-  let state = circuitStates.get(runtime);
-  if (!state) {
-    state = { failures: 0, openUntil: 0, halfOpen: false };
-    circuitStates.set(runtime, state);
-  }
-  return state;
-}
-
-export function isCircuitOpen(circuit: CircuitState): boolean {
-  if (circuit.failures < CIRCUIT_FAILURE_THRESHOLD) return false;
-  if (Date.now() > circuit.openUntil) {
-    if (circuit.halfOpen) return true; // probe already in flight
-    // Cooldown expired - enter half-open state and allow a single probe
-    circuit.halfOpen = true;
-    return false;
-  }
-  return true;
-}
-
-export function recordSuccess(circuit: CircuitState): void {
-  circuit.failures = 0;
-  circuit.halfOpen = false;
-  circuit.openUntil = 0;
-}
-
-export function recordFailure(circuit: CircuitState): void {
-  if (circuit.halfOpen) {
-    // Half-open probe failed - re-open circuit immediately
-    circuit.halfOpen = false;
-    circuit.failures = CIRCUIT_FAILURE_THRESHOLD;
-    circuit.openUntil = Date.now() + CIRCUIT_COOLDOWN_MS;
-    return;
-  }
-  if (circuit.failures < CIRCUIT_FAILURE_THRESHOLD) {
-    circuit.failures++;
-  }
-  if (circuit.failures >= CIRCUIT_FAILURE_THRESHOLD && circuit.openUntil < Date.now()) {
-    circuit.openUntil = Date.now() + CIRCUIT_COOLDOWN_MS;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Impression context builder
 // ---------------------------------------------------------------------------
 
 /**
  * Build an ImpressionContext from the current message.
  *
- * v1: sends the raw message text as the query. Category and intent are
- * configurable via runtime settings (OPERON_DEFAULT_CATEGORY,
- * OPERON_DEFAULT_INTENT) with fallback defaults. The Operon server handles
- * matching and returns `blocked` when nothing fits.
+ * Sends the raw message text as the query. Category, asset, and intent come
+ * from runtime settings (with both new and legacy names accepted) and are
+ * empty by default - the Operon server handles matching and returns
+ * `blocked` when nothing fits.
  */
 function buildImpressionContext(
   runtime: IAgentRuntime,
@@ -134,8 +108,9 @@ function buildImpressionContext(
       ? message.content
       : (message.content as { text?: string })?.text ?? "";
 
-  const category = runtime.getSetting("OPERON_DEFAULT_CATEGORY") ?? "";
-  const intent = runtime.getSetting("OPERON_DEFAULT_INTENT") ?? "";
+  const category = getSetting(runtime, "OPERON_CATEGORY", "OPERON_DEFAULT_CATEGORY") ?? "";
+  const intent = getSetting(runtime, "OPERON_INTENT", "OPERON_DEFAULT_INTENT") ?? "";
+  const asset = getSetting(runtime, "OPERON_ASSET") ?? "";
 
   return {
     publisher: publisherName,
@@ -143,7 +118,7 @@ function buildImpressionContext(
     requestContext: {
       query: text,
       category,
-      asset: "",
+      asset,
       amount: "",
       intent,
     },
@@ -196,9 +171,11 @@ export function formatPlacement(placement: PlacementDetails): string {
 /**
  * OPERON_PLACEMENT provider.
  *
- * Fires on every message. Calls Operon's /placement endpoint and injects
- * sponsored placement context into the agent's state when a match is found.
- * Returns nothing when blocked or on error - the agent responds normally.
+ * Fires on every message. Delegates network, identity, attribution, and
+ * circuit-breaker concerns to @operon/sdk; this provider is responsible for
+ * mapping ElizaOS settings/messages to the SDK and injecting the formatted
+ * placement back into the agent's state. Returns empty text on block or
+ * error so the agent responds normally.
  *
  * Data flow: the user's message text is sent to the Operon API as part of
  * the placement request. Publishers should be aware that message content is
@@ -215,11 +192,8 @@ export const operonPlacementProvider: Provider = {
     const client = ensureSDK(runtime);
     if (!client) return { text: "" };
 
-    const circuit = getCircuit(runtime);
-    if (isCircuitOpen(circuit)) return { text: "" };
-
     const publisherName =
-      runtime.getSetting("OPERON_PUBLISHER_NAME") ??
+      getSetting(runtime, "OPERON_PUBLISHER_NAME") ??
       runtime.character?.name ??
       "unknown";
 
@@ -227,7 +201,6 @@ export const operonPlacementProvider: Provider = {
 
     try {
       const result = await client.requestPlacement(context);
-      recordSuccess(circuit);
 
       if (result.decision === "filled") {
         return { text: formatPlacement(result.placement) };
@@ -235,7 +208,6 @@ export const operonPlacementProvider: Provider = {
 
       return { text: "" };
     } catch (err) {
-      recordFailure(circuit);
       console.error(
         "[operon-publisher] Placement request failed:",
         err instanceof Error ? err.message : String(err)

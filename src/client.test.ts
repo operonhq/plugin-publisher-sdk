@@ -21,8 +21,8 @@ describe("clampString", () => {
 
   it("strips control characters and Unicode direction overrides", () => {
     assert.equal(clampString("hello\x00world"), "helloworld");
-    assert.equal(clampString("safe\u202Emalicious"), "safemalicious");
-    assert.equal(clampString("zero\u200Bwidth"), "zerowidth");
+    assert.equal(clampString("safe‮malicious"), "safemalicious");
+    assert.equal(clampString("zero​width"), "zerowidth");
     assert.equal(clampString("normal text"), "normal text");
   });
 
@@ -188,7 +188,6 @@ describe("validateAuction", () => {
       winner: "w",
       ranking: [null, 42, "bad", { service: "ok", score: 50, bid: 1, rank: 2, eligible: true, reason: "" }],
     });
-    // Entries with empty service (null, 42, "bad") are filtered out
     assert.equal(result.ranking.length, 1);
     assert.equal(result.ranking[0].service, "ok");
   });
@@ -213,10 +212,12 @@ describe("validateAuction", () => {
 });
 
 // ---------------------------------------------------------------------------
-// requestPlacement() HTTP client tests
+// requestPlacement adapter tests — the HTTP layer is owned by @operon/sdk;
+// these tests verify the plugin's adapter correctly maps ImpressionContext
+// to the SDK and sanitizes the SDK's loosely-typed response.
 // ---------------------------------------------------------------------------
 
-describe("requestPlacement", () => {
+describe("createOperonPublisherSDK adapter", () => {
   const originalFetch = globalThis.fetch;
 
   afterEach(() => {
@@ -239,11 +240,27 @@ describe("requestPlacement", () => {
     },
   };
 
-  const sdk = createOperonPublisherSDK("https://api.example.com", "test-key");
+  it("validates URL at construction (rejects invalid)", () => {
+    assert.throws(() => createOperonPublisherSDK("not-a-url"));
+    assert.throws(() => createOperonPublisherSDK("ftp://example.com"));
+    assert.throws(() => createOperonPublisherSDK("https://user:pass@example.com"));
+  });
 
-  it("returns filled decision with valid placement and auction data", async () => {
-    globalThis.fetch = async () =>
-      new Response(
+  it("accepts options-object form", () => {
+    const sdk = createOperonPublisherSDK({ url: "https://api.example.com", apiKey: "k" });
+    assert.ok(typeof sdk.requestPlacement === "function");
+  });
+
+  it("returns filled decision with sanitized placement and auction data", async () => {
+    const sdk = createOperonPublisherSDK("https://api.example.com", "test-key");
+    let captured: { url: string; body: unknown; headers: Record<string, string> } | null = null;
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      captured = {
+        url,
+        body: JSON.parse(init.body as string),
+        headers: init.headers as Record<string, string>,
+      };
+      return new Response(
         JSON.stringify({
           decision: "filled",
           reason: "matched",
@@ -270,6 +287,7 @@ describe("requestPlacement", () => {
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       );
+    }) as unknown as typeof fetch;
 
     const result = await sdk.requestPlacement(dummyContext);
     assert.equal(result.decision, "filled");
@@ -279,9 +297,16 @@ describe("requestPlacement", () => {
       assert.equal(result.auction.candidates, 5);
       assert.equal(result.auction.ranking.length, 1);
     }
+    // Verify the SDK forwarded the query and category through to the wire body.
+    assert.ok(captured, "expected fetch to be called");
+    const body = (captured as unknown as { body: { impressionContext: { requestContext: { query: string; category: string } }; placement_context: string } }).body;
+    assert.equal(body.impressionContext.requestContext.query, "hello");
+    assert.equal(body.impressionContext.requestContext.category, "defi");
+    assert.equal(body.placement_context, "hello");
   });
 
   it("returns blocked decision", async () => {
+    const sdk = createOperonPublisherSDK("https://api.example.com", "test-key");
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({ decision: "blocked", reason: "no match" }),
@@ -295,7 +320,8 @@ describe("requestPlacement", () => {
     }
   });
 
-  it("throws on HTTP error response", async () => {
+  it("propagates HTTP errors thrown by the SDK", async () => {
+    const sdk = createOperonPublisherSDK("https://api.example.com", "test-key");
     globalThis.fetch = async () =>
       new Response("Internal Server Error", { status: 500, statusText: "Internal Server Error" });
 
@@ -308,14 +334,8 @@ describe("requestPlacement", () => {
     );
   });
 
-  it("throws on invalid JSON response", async () => {
-    globalThis.fetch = async () =>
-      new Response("this is not json", { status: 200, headers: { "Content-Type": "text/plain" } });
-
-    await assert.rejects(() => sdk.requestPlacement(dummyContext));
-  });
-
   it("throws on unknown decision value", async () => {
+    const sdk = createOperonPublisherSDK("https://api.example.com", "test-key");
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({ decision: "unknown-thing", reason: "wat" }),
@@ -331,23 +351,8 @@ describe("requestPlacement", () => {
     );
   });
 
-  it("throws on missing decision field", async () => {
-    globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({ reason: "no decision here" }),
-        { status: 200, headers: { "Content-Type": "application/json" } }
-      );
-
-    await assert.rejects(
-      () => sdk.requestPlacement(dummyContext),
-      (err: Error) => {
-        assert.match(err.message, /missing decision/i);
-        return true;
-      }
-    );
-  });
-
-  it("throws on network/fetch failure", async () => {
+  it("propagates network failure from the SDK", async () => {
+    const sdk = createOperonPublisherSDK("https://api.example.com", "test-key");
     globalThis.fetch = async () => {
       throw new TypeError("fetch failed");
     };
@@ -359,5 +364,21 @@ describe("requestPlacement", () => {
         return true;
       }
     );
+  });
+
+  it("works without apiKey (sandbox lane)", async () => {
+    const sdk = createOperonPublisherSDK({ url: "https://api.example.com" });
+    let capturedHeaders: Record<string, string> | null = null;
+    globalThis.fetch = (async (_url: string, init: RequestInit) => {
+      capturedHeaders = init.headers as Record<string, string>;
+      return new Response(
+        JSON.stringify({ decision: "blocked", reason: "no match" }),
+        { status: 200, headers: { "Content-Type": "application/json" } }
+      );
+    }) as unknown as typeof fetch;
+
+    await sdk.requestPlacement(dummyContext);
+    assert.ok(capturedHeaders, "expected fetch to be called");
+    assert.ok(!("Authorization" in (capturedHeaders as Record<string, string>)), "sandbox lane must not send Authorization header");
   });
 });

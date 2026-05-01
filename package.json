@@ -1,6 +1,6 @@
 {
   "name": "@operon/plugin-publisher-sdk",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "description": "ElizaOS plugin for Operon - monetize agent responses with quality-weighted sponsored placements",
   "type": "module",
   "main": "dist/index.js",
@@ -26,6 +26,9 @@
   "peerDependencies": {
     "@elizaos/core": "^0.1.0"
   },
+  "dependencies": {
+    "@operon/sdk": "^0.1.2"
+  },
   "devDependencies": {
     "@elizaos/core": "^0.1.0",
     "tsup": "^8.3.5",
@@ -35,30 +38,45 @@
   "agentConfig": {
     "pluginType": "elizaos:plugin:1.0.0",
     "pluginParameters": {
+      "OPERON_API_URL": {
+        "type": "string",
+        "required": false,
+        "description": "Operon network URL (e.g. https://api.operon.so). Legacy alias: OPERON_URL."
+      },
       "OPERON_URL": {
         "type": "string",
-        "required": true,
-        "description": "Operon network URL (e.g. https://api.operon.so)"
+        "required": false,
+        "description": "Legacy alias for OPERON_API_URL. Either one is required."
       },
       "OPERON_API_KEY": {
         "type": "string",
-        "required": true,
-        "description": "Publisher API key from Operon"
+        "required": false,
+        "description": "Publisher API key from Operon. Optional - omit to run in sandbox mode."
       },
       "OPERON_PUBLISHER_NAME": {
         "type": "string",
         "required": false,
         "description": "Publisher identifier reported to Operon (defaults to character name)"
       },
-      "OPERON_DEFAULT_CATEGORY": {
+      "OPERON_CATEGORY": {
         "type": "string",
         "required": false,
-        "description": "Default category for placement requests (e.g. defi, gaming, social)"
+        "description": "Category for placement requests (e.g. defi, gaming, social). Legacy alias: OPERON_DEFAULT_CATEGORY."
       },
-      "OPERON_DEFAULT_INTENT": {
+      "OPERON_INTENT": {
         "type": "string",
         "required": false,
-        "description": "Default intent for placement requests (e.g. research, swap, trade)"
+        "description": "Intent for placement requests (e.g. research, swap, trade). Legacy alias: OPERON_DEFAULT_INTENT."
+      },
+      "OPERON_ASSET": {
+        "type": "string",
+        "required": false,
+        "description": "Asset for placement requests (e.g. ETH, USDC)."
+      },
+      "OPERON_SOURCE": {
+        "type": "string",
+        "required": false,
+        "description": "Marketplace/skill attribution tag (first-touch wins). See @operon/sdk docs."
       }
     }
   },

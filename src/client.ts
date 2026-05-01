@@ -1,3 +1,4 @@
+import { initOperon, type OperonClient, type PlacementContext } from "@operon/sdk";
 import type { AuctionResult, ImpressionContext, OperonPlacementResponse, PlacementDetails } from "./types.js";
 
 export interface OperonPublisherSDK {
@@ -6,14 +7,20 @@ export interface OperonPublisherSDK {
   ): Promise<OperonPlacementResponse>;
 }
 
-const REQUEST_TIMEOUT_MS = 10_000;
+export interface CreateOperonPublisherSDKOptions {
+  url: string;
+  apiKey?: string;
+  publisherName?: string;
+  source?: string;
+  timeoutMs?: number;
+}
+
 const MAX_STRING_FIELD_LENGTH = 500;
-const MAX_ERROR_BODY_LENGTH = 200;
 
 /** Clamp a string field to a safe length, stripping control characters */
 export function clampString(val: unknown, maxLen = MAX_STRING_FIELD_LENGTH): string {
   if (typeof val !== "string") return "";
-  return val.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]/g, "").slice(0, maxLen);
+  return val.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f​-‏‪-‮⁠-⁤﻿]/g, "").slice(0, maxLen);
 }
 
 /** Clamp a number to a safe range */
@@ -103,54 +110,65 @@ export function validatePlacement(raw: unknown): PlacementDetails {
     endpoint: sanitizeUrl(p.endpoint, 200),
     clickUrl: sanitizeClickUrl(p.clickUrl),
     scoutScore: p.scoutScore != null ? clampNumber(p.scoutScore, 0, 100) : null,
-    // Range [0, 10_000] matches the auction ranking entries; should match the server's API contract
     rank: clampNumber(p.rank, 0, 10_000),
     bidPrice: clampNumber(p.bidPrice, 0, 1_000_000),
   };
 }
 
+/**
+ * Create a thin adapter that delegates network, identity, attribution, and
+ * circuit-breaker concerns to @operon/sdk. The adapter preserves the v0.1.x
+ * `requestPlacement(ImpressionContext)` shape so callers don't have to change.
+ *
+ * Sandbox lane: if `apiKey` is omitted, the underlying SDK runs in sandbox
+ * mode (mints a client UUID at ~/.operon/client.json, no auth required).
+ */
 export function createOperonPublisherSDK(
-  operonUrl: string,
-  apiKey: string
+  urlOrOptions: string | CreateOperonPublisherSDKOptions,
+  apiKey?: string
 ): OperonPublisherSDK {
-  // Validate URL at construction time so callers bypassing ensureSDK still get safety checks
+  const opts: CreateOperonPublisherSDKOptions =
+    typeof urlOrOptions === "string"
+      ? { url: urlOrOptions, apiKey }
+      : urlOrOptions;
+
   let parsed: URL;
   try {
-    parsed = new URL(operonUrl);
+    parsed = new URL(opts.url);
   } catch {
-    throw new Error(`[operon-publisher] Invalid OPERON_URL: ${clampString(operonUrl, 80)}`);
+    throw new Error(`[operon-publisher] Invalid url: ${clampString(opts.url, 80)}`);
   }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw new Error(`[operon-publisher] OPERON_URL must use http or https (got ${parsed.protocol})`);
+    throw new Error(`[operon-publisher] url must use http or https (got ${parsed.protocol})`);
   }
   if (parsed.username || parsed.password) {
-    throw new Error("[operon-publisher] OPERON_URL must not contain credentials");
+    throw new Error("[operon-publisher] url must not contain credentials");
   }
-  const baseUrl = operonUrl.replace(/\/+$/, "");
+
+  const operon: OperonClient = initOperon({
+    url: opts.url,
+    apiKey: opts.apiKey,
+    publisherName: opts.publisherName,
+    source: opts.source,
+    timeoutMs: opts.timeoutMs,
+  });
 
   return {
     async requestPlacement(
       context: ImpressionContext
     ): Promise<OperonPlacementResponse> {
-      const response = await fetch(`${baseUrl}/placement`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({ impressionContext: context }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
+      const query = context.requestContext.query ?? "";
+      const sdkContext: PlacementContext = {
+        placement_context: query,
+        category: context.requestContext.category,
+        asset: context.requestContext.asset,
+        amount: context.requestContext.amount,
+        intent: context.requestContext.intent,
+        sentiment: context.responseContext.sentiment,
+        actions: context.responseContext.actions,
+      };
 
-      if (!response.ok) {
-        const body = await response.text().catch(() => "");
-        const truncated = body.slice(0, MAX_ERROR_BODY_LENGTH);
-        throw new Error(
-          `Operon placement request failed: ${response.status} ${response.statusText}${truncated ? ` - ${truncated}` : ""}`
-        );
-      }
-
-      const data: unknown = await response.json();
+      const data = await operon.getPlacement(query, sdkContext);
 
       if (!data || typeof data !== "object" || !("decision" in data)) {
         throw new Error(
@@ -158,29 +176,27 @@ export function createOperonPublisherSDK(
         );
       }
 
-      const obj = data as Record<string, unknown>;
-
-      if (obj.decision === "filled") {
-        const placement = validatePlacement(obj.placement);
-        const auction = validateAuction(obj.auction);
+      if (data.decision === "filled") {
+        const placement = validatePlacement(data.placement);
+        const auction = validateAuction(data.auction);
 
         return {
           decision: "filled",
-          reason: clampString(obj.reason),
+          reason: clampString(data.reason),
           placement,
           auction,
         };
       }
 
-      if (obj.decision === "blocked") {
+      if (data.decision === "blocked") {
         return {
           decision: "blocked",
-          reason: clampString(obj.reason),
+          reason: clampString(data.reason),
         };
       }
 
       throw new Error(
-        `Operon returned unknown decision: ${String(obj.decision)}`
+        `Operon returned unknown decision: ${String((data as { decision: unknown }).decision)}`
       );
     },
   };
