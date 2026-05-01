@@ -5,7 +5,7 @@ import { OperonRetryableError as OperonRetryableError2 } from "@operon/sdk";
 import { initOperon } from "@operon/sdk";
 var MAX_STRING_FIELD_LENGTH = 500;
 var STRIP_RE = new RegExp(
-  "[\\x00-\\x1f\\x7f\\u0085\\u200b-\\u200f\\u202a-\\u202e\\u2028\\u2029\\u2060-\\u2064\\ufeff]",
+  "[\\x00-\\x1f\\x7f\\u0085\\u200b-\\u200f\\u202a-\\u202e\\u2028\\u2029\\u2060-\\u2064\\u2066-\\u2069\\ufeff]",
   "g"
 );
 var FENCE_RE = /\[SPONSORED_CONTENT_(START|END)\]/gi;
@@ -202,7 +202,7 @@ function ensureSDK(runtime) {
     return null;
   }
   if (parsed.protocol !== "https:" && !isLocalhost(parsed)) {
-    if (runtime.getSetting("OPERON_ALLOW_HTTP") === "true") {
+    if (getSetting(runtime, "OPERON_ALLOW_HTTP") === "true") {
       console.warn(
         `[operon-publisher] url is not HTTPS (host=${parsed.hostname}). OPERON_ALLOW_HTTP is set - continuing, but credentials may be exposed.`
       );
@@ -241,7 +241,7 @@ function ensureSDK(runtime) {
     console.warn(
       `[operon-publisher] Running in SANDBOX mode (OPERON_API_KEY not set). Traffic to ${parsed.hostname} is unauthenticated.`
     );
-  } else if (runtime.getSetting("OPERON_DEBUG") === "true") {
+  } else if (getSetting(runtime, "OPERON_DEBUG") === "true") {
     console.log(`[operon-publisher] Connected to ${parsed.hostname}`);
   }
   return instance;
@@ -318,7 +318,7 @@ var operonPlacementProvider = {
         console.warn(
           `[operon-publisher] First placement failure for this runtime (class=${klass}): ${msg}`
         );
-      } else if (runtime.getSetting?.("OPERON_DEBUG") === "true") {
+      } else if (getSetting(runtime, "OPERON_DEBUG") === "true") {
         console.error(`[operon-publisher] Placement request failed (class=${klass}): ${msg}`);
       }
       return EMPTY;

@@ -74,7 +74,7 @@ function ensureSDK(runtime: IAgentRuntime): OperonPublisherSDK | null {
   // Hostname-based check - rejects http://localhost.evil.com which a
   // startsWith("http://localhost") guard would let through.
   if (parsed.protocol !== "https:" && !isLocalhost(parsed)) {
-    if (runtime.getSetting("OPERON_ALLOW_HTTP") === "true") {
+    if (getSetting(runtime, "OPERON_ALLOW_HTTP") === "true") {
       console.warn(
         `[operon-publisher] url is not HTTPS (host=${parsed.hostname}). OPERON_ALLOW_HTTP is set - continuing, but credentials may be exposed.`
       );
@@ -125,7 +125,7 @@ function ensureSDK(runtime: IAgentRuntime): OperonPublisherSDK | null {
     console.warn(
       `[operon-publisher] Running in SANDBOX mode (OPERON_API_KEY not set). Traffic to ${parsed.hostname} is unauthenticated.`
     );
-  } else if (runtime.getSetting("OPERON_DEBUG") === "true") {
+  } else if (getSetting(runtime, "OPERON_DEBUG") === "true") {
     console.log(`[operon-publisher] Connected to ${parsed.hostname}`);
   }
 
@@ -278,7 +278,7 @@ export const operonPlacementProvider: Provider = {
         console.warn(
           `[operon-publisher] First placement failure for this runtime (class=${klass}): ${msg}`
         );
-      } else if (runtime.getSetting?.("OPERON_DEBUG") === "true") {
+      } else if (getSetting(runtime, "OPERON_DEBUG") === "true") {
         console.error(`[operon-publisher] Placement request failed (class=${klass}): ${msg}`);
       }
       return EMPTY;

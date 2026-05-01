@@ -46,6 +46,7 @@ const STRIP_RE = new RegExp(
     "\\u202a-\\u202e" + // bidi formatting controls
     "\\u2028\\u2029" +  // LINE / PARAGRAPH SEPARATOR
     "\\u2060-\\u2064" + // invisible separators
+    "\\u2066-\\u2069" + // bidi isolate controls (LRI/RLI/FSI/PDI, Trojan-Source)
     "\\ufeff" +         // BOM / zero-width no-break space
   "]",
   "g"
