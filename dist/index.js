@@ -1,13 +1,43 @@
+// src/providers/operonPlacement.ts
+import { OperonRetryableError as OperonRetryableError2 } from "@operon/sdk";
+
 // src/client.ts
 import { initOperon } from "@operon/sdk";
 var MAX_STRING_FIELD_LENGTH = 500;
+var STRIP_RE = new RegExp(
+  "[\\x00-\\x1f\\x7f\\u0085\\u200b-\\u200f\\u202a-\\u202e\\u2028\\u2029\\u2060-\\u2064\\ufeff]",
+  "g"
+);
+var FENCE_RE = /\[SPONSORED_CONTENT_(START|END)\]/gi;
 function clampString(val, maxLen = MAX_STRING_FIELD_LENGTH) {
   if (typeof val !== "string") return "";
-  return val.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f​-‏‪-‮⁠-⁤﻿]/g, "").slice(0, maxLen);
+  return val.replace(STRIP_RE, "").replace(FENCE_RE, "").slice(0, maxLen);
 }
 function clampNumber(val, min, max) {
   if (typeof val !== "number" || !Number.isFinite(val)) return 0;
   return Math.max(min, Math.min(max, val));
+}
+function validateUrl(input) {
+  let parsed;
+  try {
+    parsed = new URL(input);
+  } catch {
+    throw new Error(`[operon-publisher] Invalid url: ${clampString(input, 80)}`);
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error(`[operon-publisher] url must use http or https (got ${parsed.protocol})`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("[operon-publisher] url must not contain credentials");
+  }
+  return parsed;
+}
+function isLocalhost(parsed) {
+  const h = parsed.hostname;
+  return h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h === "::1";
+}
+function parseOperonUrl(input) {
+  return validateUrl(input);
 }
 function sanitizeUrl(val, maxLen) {
   const s = clampString(val, maxLen);
@@ -26,7 +56,8 @@ function sanitizeClickUrl(val) {
   if (val && typeof val === "string" && val.trim() && !sanitized) {
     console.warn(`[operon-publisher] clickUrl rejected by sanitizeUrl: ${val.slice(0, 80).replace(/[\r\n\t]/g, " ")}`);
   }
-  return sanitized || null;
+  if (!sanitized) return null;
+  return sanitized.replace(/[()\[\]<> `\\]/g, (c) => encodeURIComponent(c));
 }
 var MAX_RANKING_ENTRIES = 50;
 function validateAuction(raw) {
@@ -80,24 +111,14 @@ function validatePlacement(raw) {
 }
 function createOperonPublisherSDK(urlOrOptions, apiKey) {
   const opts = typeof urlOrOptions === "string" ? { url: urlOrOptions, apiKey } : urlOrOptions;
-  let parsed;
-  try {
-    parsed = new URL(opts.url);
-  } catch {
-    throw new Error(`[operon-publisher] Invalid url: ${clampString(opts.url, 80)}`);
-  }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw new Error(`[operon-publisher] url must use http or https (got ${parsed.protocol})`);
-  }
-  if (parsed.username || parsed.password) {
-    throw new Error("[operon-publisher] url must not contain credentials");
-  }
+  validateUrl(opts.url);
   const operon = initOperon({
     url: opts.url,
     apiKey: opts.apiKey,
     publisherName: opts.publisherName,
     source: opts.source,
-    timeoutMs: opts.timeoutMs
+    timeoutMs: opts.timeoutMs,
+    onRetryable: opts.onRetryable
   });
   return {
     async requestPlacement(context) {
@@ -143,12 +164,18 @@ function createOperonPublisherSDK(urlOrOptions, apiKey) {
 // src/providers/operonPlacement.ts
 function getSetting(runtime, ...keys) {
   for (const key of keys) {
-    const v = runtime.getSetting(key);
+    let v;
+    try {
+      v = runtime.getSetting(key);
+    } catch {
+      continue;
+    }
     if (v != null && String(v).trim() !== "") return String(v);
   }
   return null;
 }
 var sdkCache = /* @__PURE__ */ new WeakMap();
+var firstFailureLogged = /* @__PURE__ */ new WeakSet();
 function ensureSDK(runtime) {
   if (sdkCache.has(runtime)) {
     const cached = sdkCache.get(runtime);
@@ -164,40 +191,66 @@ function ensureSDK(runtime) {
   }
   const key = getSetting(runtime, "OPERON_API_KEY") ?? void 0;
   const trimmedUrl = url.trim();
-  if (!trimmedUrl.startsWith("https://") && !trimmedUrl.startsWith("http://localhost")) {
+  let parsed;
+  try {
+    parsed = parseOperonUrl(trimmedUrl);
+  } catch (err) {
+    console.error(
+      "[operon-publisher] " + (err instanceof Error ? err.message : String(err)) + ". Plugin disabled."
+    );
+    sdkCache.set(runtime, false);
+    return null;
+  }
+  if (parsed.protocol !== "https:" && !isLocalhost(parsed)) {
     if (runtime.getSetting("OPERON_ALLOW_HTTP") === "true") {
       console.warn(
-        `[operon-publisher] url is not HTTPS (${new URL(trimmedUrl).protocol}). OPERON_ALLOW_HTTP is set \u2014 continuing, but credentials may be exposed.`
+        `[operon-publisher] url is not HTTPS (host=${parsed.hostname}). OPERON_ALLOW_HTTP is set - continuing, but credentials may be exposed.`
       );
     } else {
       console.error(
-        `[operon-publisher] url must use HTTPS in production (got ${new URL(trimmedUrl).protocol}). Set OPERON_ALLOW_HTTP=true to override. Plugin disabled.`
+        `[operon-publisher] url must use HTTPS in production (host=${parsed.hostname}). Set OPERON_ALLOW_HTTP=true to override. Plugin disabled.`
       );
       sdkCache.set(runtime, false);
       return null;
     }
   }
-  const publisherName = getSetting(runtime, "OPERON_PUBLISHER_NAME") ?? runtime.character?.name ?? void 0;
+  const publisherName = getSetting(runtime, "OPERON_PUBLISHER_NAME") ?? (typeof runtime.character?.name === "string" ? runtime.character.name : void 0);
   const source = getSetting(runtime, "OPERON_SOURCE") ?? void 0;
-  const instance = createOperonPublisherSDK({
-    url: trimmedUrl,
-    apiKey: key?.trim(),
-    publisherName,
-    source
-  });
+  let instance;
+  try {
+    instance = createOperonPublisherSDK({
+      url: trimmedUrl,
+      apiKey: key?.trim(),
+      publisherName,
+      source,
+      onRetryable: (err) => {
+        console.warn(
+          `[operon-publisher] server requested backoff: retry-after=${err.retryAfterMs}ms`
+        );
+      }
+    });
+  } catch (err) {
+    console.error(
+      "[operon-publisher] SDK init failed: " + (err instanceof Error ? err.message : String(err)) + ". Plugin disabled."
+    );
+    sdkCache.set(runtime, false);
+    return null;
+  }
   sdkCache.set(runtime, instance);
-  if (runtime.getSetting("OPERON_DEBUG") === "true") {
-    try {
-      const hostname = new URL(trimmedUrl).hostname;
-      console.log(`[operon-publisher] Connected to ${hostname}${key ? "" : " (sandbox)"}`);
-    } catch {
-      console.log("[operon-publisher] Connected");
-    }
+  if (!key) {
+    console.warn(
+      `[operon-publisher] Running in SANDBOX mode (OPERON_API_KEY not set). Traffic to ${parsed.hostname} is unauthenticated.`
+    );
+  } else if (runtime.getSetting("OPERON_DEBUG") === "true") {
+    console.log(`[operon-publisher] Connected to ${parsed.hostname}`);
   }
   return instance;
 }
-function buildImpressionContext(runtime, publisherName, message) {
-  const text = typeof message.content === "string" ? message.content : message.content?.text ?? "";
+function getMessageText(message) {
+  if (typeof message.content === "string") return message.content;
+  return message.content?.text ?? "";
+}
+function buildImpressionContext(runtime, publisherName, text) {
   const category = getSetting(runtime, "OPERON_CATEGORY", "OPERON_DEFAULT_CATEGORY") ?? "";
   const intent = getSetting(runtime, "OPERON_INTENT", "OPERON_DEFAULT_INTENT") ?? "";
   const asset = getSetting(runtime, "OPERON_ASSET") ?? "";
@@ -229,26 +282,46 @@ function formatPlacement(placement) {
     `[SPONSORED_CONTENT_END]`
   ].filter(Boolean).join("\n");
 }
+var EMPTY = { text: "" };
+function classifyError(err) {
+  if (err instanceof OperonRetryableError2) return `server-backoff (${err.retryAfterMs}ms)`;
+  if (err instanceof Error) {
+    if (err.message.includes("circuit breaker")) return "circuit-open";
+    if (/timeout|abort/i.test(err.message)) return "timeout";
+    const m = err.message.match(/Operon (\d{3}):/);
+    if (m) return `http-${m[1]}`;
+    return err.name || "error";
+  }
+  return "unknown";
+}
 var operonPlacementProvider = {
   name: "OPERON_PLACEMENT",
   description: "Sponsored placement from Operon ad network - injects quality-gated sponsored content into agent responses",
   get: async (runtime, message, _state) => {
-    const client = ensureSDK(runtime);
-    if (!client) return { text: "" };
-    const publisherName = getSetting(runtime, "OPERON_PUBLISHER_NAME") ?? runtime.character?.name ?? "unknown";
-    const context = buildImpressionContext(runtime, publisherName, message);
     try {
+      const text = getMessageText(message);
+      if (!text.trim()) return EMPTY;
+      const client = ensureSDK(runtime);
+      if (!client) return EMPTY;
+      const publisherName = getSetting(runtime, "OPERON_PUBLISHER_NAME") ?? (typeof runtime.character?.name === "string" ? runtime.character.name : "unknown");
+      const context = buildImpressionContext(runtime, publisherName, text);
       const result = await client.requestPlacement(context);
       if (result.decision === "filled") {
         return { text: formatPlacement(result.placement) };
       }
-      return { text: "" };
+      return EMPTY;
     } catch (err) {
-      console.error(
-        "[operon-publisher] Placement request failed:",
-        err instanceof Error ? err.message : String(err)
-      );
-      return { text: "" };
+      const klass = classifyError(err);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!firstFailureLogged.has(runtime)) {
+        firstFailureLogged.add(runtime);
+        console.warn(
+          `[operon-publisher] First placement failure for this runtime (class=${klass}): ${msg}`
+        );
+      } else if (runtime.getSetting?.("OPERON_DEBUG") === "true") {
+        console.error(`[operon-publisher] Placement request failed (class=${klass}): ${msg}`);
+      }
+      return EMPTY;
     }
   }
 };

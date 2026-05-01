@@ -1,4 +1,5 @@
 import { Plugin } from '@elizaos/core';
+import { OperonRetryableError } from '@operon/sdk';
 
 /** Impression context payload sent to Operon */
 interface ImpressionContext {
@@ -81,6 +82,11 @@ interface CreateOperonPublisherSDKOptions {
     publisherName?: string;
     source?: string;
     timeoutMs?: number;
+    /**
+     * Forwarded to @operon/sdk. Fired (fire-and-forget) when the server
+     * returns 503 + Retry-After. Use for telemetry / observability.
+     */
+    onRetryable?: (err: OperonRetryableError) => void;
 }
 /**
  * Create a thin adapter that delegates network, identity, attribution, and

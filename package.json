@@ -76,7 +76,17 @@
       "OPERON_SOURCE": {
         "type": "string",
         "required": false,
-        "description": "Marketplace/skill attribution tag (first-touch wins). See @operon/sdk docs."
+        "description": "Marketplace/skill attribution tag. First-touch wins: persisted to ~/.operon/client.json on first valid call and ignored on later inits with a different value."
+      },
+      "OPERON_ALLOW_HTTP": {
+        "type": "string",
+        "required": false,
+        "description": "Set to \"true\" to allow plain HTTP (development only). Default is HTTPS-required."
+      },
+      "OPERON_DEBUG": {
+        "type": "string",
+        "required": false,
+        "description": "Set to \"true\" to log connection details and per-request failure classes."
       }
     }
   },

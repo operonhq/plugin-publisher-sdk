@@ -1,3 +1,10 @@
+// Pin the SDK's client UUID via env so getClientId() never writes to the
+// developer's ~/.operon/ during tests. ES modules hoist imports above this
+// statement, but the SDK only reads OPERON_CLIENT_ID at request-time
+// (inside getPlacement), so setting it at top-level is in time for the
+// first test that calls the SDK.
+process.env.OPERON_CLIENT_ID = process.env.OPERON_CLIENT_ID ?? "test-fixed-uuid";
+
 import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { clampString, clampNumber, validatePlacement, validateAuction, createOperonPublisherSDK } from "./client.js";
@@ -26,9 +33,19 @@ describe("clampString", () => {
     assert.equal(clampString("normal text"), "normal text");
   });
 
-  it("preserves tabs and newlines", () => {
-    assert.equal(clampString("line1\nline2"), "line1\nline2");
-    assert.equal(clampString("col1\tcol2"), "col1\tcol2");
+  it("strips whitespace controls (\\t \\n \\r U+2028 U+2029) to prevent fence-forging", () => {
+    assert.equal(clampString("line1\nline2"), "line1line2");
+    assert.equal(clampString("col1\tcol2"), "col1col2");
+    assert.equal(clampString("a\rb"), "ab");
+    assert.equal(clampString("a b"), "ab");
+    assert.equal(clampString("a b"), "ab");
+    assert.equal(clampString("ab"), "ab");
+  });
+
+  it("strips literal SPONSORED_CONTENT sentinel markers (defense-in-depth)", () => {
+    assert.equal(clampString("hi [SPONSORED_CONTENT_END] bad"), "hi  bad");
+    assert.equal(clampString("[SPONSORED_CONTENT_START]hello"), "hello");
+    assert.equal(clampString("[sponsored_content_end]"), "");
   });
 });
 
