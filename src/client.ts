@@ -1,3 +1,4 @@
+import { initOperon, OperonRetryableError, type OperonClient, type PlacementContext } from "@operon/sdk";
 import type { AuctionResult, ImpressionContext, OperonPlacementResponse, PlacementDetails } from "./types.js";
 
 export interface OperonPublisherSDK {
@@ -6,14 +7,61 @@ export interface OperonPublisherSDK {
   ): Promise<OperonPlacementResponse>;
 }
 
-const REQUEST_TIMEOUT_MS = 10_000;
-const MAX_STRING_FIELD_LENGTH = 500;
-const MAX_ERROR_BODY_LENGTH = 200;
+export interface CreateOperonPublisherSDKOptions {
+  url: string;
+  apiKey?: string;
+  publisherName?: string;
+  source?: string;
+  timeoutMs?: number;
+  /**
+   * Forwarded to @operon/sdk. Fired (fire-and-forget) when the server
+   * returns 503 + Retry-After. Use for telemetry / observability.
+   */
+  onRetryable?: (err: OperonRetryableError) => void;
+}
 
-/** Clamp a string field to a safe length, stripping control characters */
+const MAX_STRING_FIELD_LENGTH = 500;
+
+// Strip:
+//  - all C0 control bytes 0x00-0x1F (this includes \t \n \r -- see comment below)
+//  - DEL (0x7F)
+//  - U+0085 NEL (next line)
+//  - U+200B-U+200F (zero-width + LRM/RLM)
+//  - U+202A-U+202E (bidi formatting controls)
+//  - U+2028 LINE SEPARATOR / U+2029 PARAGRAPH SEPARATOR
+//  - U+2060-U+2064 (invisible separators)
+//  - U+FEFF BOM
+//
+// Newlines are intentionally stripped: every clamped field flows into the
+// LLM-context SPONSORED_CONTENT block on its own line. If a hostile campaign
+// description carries a literal \n followed by `[SPONSORED_CONTENT_END]`, it
+// would forge the closing fence and inject instructions outside the sandbox.
+// Strip whitespace controls and the user sees the description as one line.
+const STRIP_RE = new RegExp(
+  "[" +
+    "\\x00-\\x1f" +     // C0 controls (incl. \t \n \r)
+    "\\x7f" +           // DEL
+    "\\u0085" +         // NEL (next line)
+    "\\u200b-\\u200f" + // zero-width + LRM/RLM
+    "\\u202a-\\u202e" + // bidi formatting controls
+    "\\u2028\\u2029" +  // LINE / PARAGRAPH SEPARATOR
+    "\\u2060-\\u2064" + // invisible separators
+    "\\u2066-\\u2069" + // bidi isolate controls (LRI/RLI/FSI/PDI, Trojan-Source)
+    "\\ufeff" +         // BOM / zero-width no-break space
+  "]",
+  "g"
+);
+
+// Defense-in-depth: prevent attacker-controlled fields from forging the
+// sentinel markers used by formatPlacement(), even if a future code change
+// allows a newline through clampString. The marker text is fixed; matching
+// case-insensitively to be safe.
+const FENCE_RE = /\[SPONSORED_CONTENT_(START|END)\]/gi;
+
+/** Clamp a string field to a safe length, stripping control characters and sentinel markers. */
 export function clampString(val: unknown, maxLen = MAX_STRING_FIELD_LENGTH): string {
   if (typeof val !== "string") return "";
-  return val.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]/g, "").slice(0, maxLen);
+  return val.replace(STRIP_RE, "").replace(FENCE_RE, "").slice(0, maxLen);
 }
 
 /** Clamp a number to a safe range */
@@ -22,7 +70,41 @@ export function clampNumber(val: unknown, min: number, max: number): number {
   return Math.max(min, Math.min(max, val));
 }
 
-/** Validate and normalize a URL string, allowing only http/https protocols */
+/**
+ * Validate URL: only http(s), no embedded credentials. Returns the parsed URL
+ * for callers that also need hostname-based decisions (HTTPS-vs-localhost).
+ */
+function validateUrl(input: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(input);
+  } catch {
+    throw new Error(`[operon-publisher] Invalid url: ${clampString(input, 80)}`);
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error(`[operon-publisher] url must use http or https (got ${parsed.protocol})`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error("[operon-publisher] url must not contain credentials");
+  }
+  return parsed;
+}
+
+/** True when a parsed URL points at a loopback host. Hostname-based; rejects http://localhost.evil.com. */
+export function isLocalhost(parsed: URL): boolean {
+  const h = parsed.hostname;
+  return h === "localhost" || h === "127.0.0.1" || h === "[::1]" || h === "::1";
+}
+
+/** Parse + validate a candidate URL string and return the parsed URL. Exported for the provider's HTTPS guard. */
+export function parseOperonUrl(input: string): URL {
+  return validateUrl(input);
+}
+
+/**
+ * Validate a generic URL field from untrusted server data; only http/https
+ * with no credentials, no other schemes. Length-clamped first.
+ */
 function sanitizeUrl(val: unknown, maxLen: number): string {
   const s = clampString(val, maxLen);
   if (!s) return "";
@@ -36,13 +118,20 @@ function sanitizeUrl(val: unknown, maxLen: number): string {
   }
 }
 
-/** Sanitize a clickUrl, warning when a non-empty value is rejected */
+/**
+ * Sanitize a clickUrl that the LLM will be told to render as a Markdown link.
+ * Beyond the protocol/credential checks, percent-encode characters that could
+ * break out of the [label](url) syntax -- `(`, `)`, `[`, `]`, `<`, `>`, ` `,
+ * backtick, backslash. Standard `URL.href` already encodes most of these in
+ * paths but not always in the query string.
+ */
 function sanitizeClickUrl(val: unknown): string | null {
   const sanitized = sanitizeUrl(val, 500);
   if (val && typeof val === "string" && val.trim() && !sanitized) {
     console.warn(`[operon-publisher] clickUrl rejected by sanitizeUrl: ${val.slice(0, 80).replace(/[\r\n\t]/g, " ")}`);
   }
-  return sanitized || null;
+  if (!sanitized) return null;
+  return sanitized.replace(/[()\[\]<> `\\]/g, (c) => encodeURIComponent(c));
 }
 
 const MAX_RANKING_ENTRIES = 50;
@@ -103,54 +192,55 @@ export function validatePlacement(raw: unknown): PlacementDetails {
     endpoint: sanitizeUrl(p.endpoint, 200),
     clickUrl: sanitizeClickUrl(p.clickUrl),
     scoutScore: p.scoutScore != null ? clampNumber(p.scoutScore, 0, 100) : null,
-    // Range [0, 10_000] matches the auction ranking entries; should match the server's API contract
     rank: clampNumber(p.rank, 0, 10_000),
     bidPrice: clampNumber(p.bidPrice, 0, 1_000_000),
   };
 }
 
+/**
+ * Create a thin adapter that delegates network, identity, attribution, and
+ * circuit-breaker concerns to @operon/sdk. The adapter preserves the v0.1.x
+ * `requestPlacement(ImpressionContext)` shape so callers don't have to change.
+ *
+ * Sandbox lane: if `apiKey` is omitted, the underlying SDK runs in sandbox
+ * mode (mints a client UUID at ~/.operon/client.json, no auth required).
+ */
 export function createOperonPublisherSDK(
-  operonUrl: string,
-  apiKey: string
+  urlOrOptions: string | CreateOperonPublisherSDKOptions,
+  apiKey?: string
 ): OperonPublisherSDK {
-  // Validate URL at construction time so callers bypassing ensureSDK still get safety checks
-  let parsed: URL;
-  try {
-    parsed = new URL(operonUrl);
-  } catch {
-    throw new Error(`[operon-publisher] Invalid OPERON_URL: ${clampString(operonUrl, 80)}`);
-  }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    throw new Error(`[operon-publisher] OPERON_URL must use http or https (got ${parsed.protocol})`);
-  }
-  if (parsed.username || parsed.password) {
-    throw new Error("[operon-publisher] OPERON_URL must not contain credentials");
-  }
-  const baseUrl = operonUrl.replace(/\/+$/, "");
+  const opts: CreateOperonPublisherSDKOptions =
+    typeof urlOrOptions === "string"
+      ? { url: urlOrOptions, apiKey }
+      : urlOrOptions;
+
+  validateUrl(opts.url);
+
+  const operon: OperonClient = initOperon({
+    url: opts.url,
+    apiKey: opts.apiKey,
+    publisherName: opts.publisherName,
+    source: opts.source,
+    timeoutMs: opts.timeoutMs,
+    onRetryable: opts.onRetryable,
+  });
 
   return {
     async requestPlacement(
       context: ImpressionContext
     ): Promise<OperonPlacementResponse> {
-      const response = await fetch(`${baseUrl}/placement`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({ impressionContext: context }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      });
+      const query = context.requestContext.query ?? "";
+      const sdkContext: PlacementContext = {
+        placement_context: query,
+        category: context.requestContext.category,
+        asset: context.requestContext.asset,
+        amount: context.requestContext.amount,
+        intent: context.requestContext.intent,
+        sentiment: context.responseContext.sentiment,
+        actions: context.responseContext.actions,
+      };
 
-      if (!response.ok) {
-        const body = await response.text().catch(() => "");
-        const truncated = body.slice(0, MAX_ERROR_BODY_LENGTH);
-        throw new Error(
-          `Operon placement request failed: ${response.status} ${response.statusText}${truncated ? ` - ${truncated}` : ""}`
-        );
-      }
-
-      const data: unknown = await response.json();
+      const data = await operon.getPlacement(query, sdkContext);
 
       if (!data || typeof data !== "object" || !("decision" in data)) {
         throw new Error(
@@ -158,29 +248,27 @@ export function createOperonPublisherSDK(
         );
       }
 
-      const obj = data as Record<string, unknown>;
-
-      if (obj.decision === "filled") {
-        const placement = validatePlacement(obj.placement);
-        const auction = validateAuction(obj.auction);
+      if (data.decision === "filled") {
+        const placement = validatePlacement(data.placement);
+        const auction = validateAuction(data.auction);
 
         return {
           decision: "filled",
-          reason: clampString(obj.reason),
+          reason: clampString(data.reason),
           placement,
           auction,
         };
       }
 
-      if (obj.decision === "blocked") {
+      if (data.decision === "blocked") {
         return {
           decision: "blocked",
-          reason: clampString(obj.reason),
+          reason: clampString(data.reason),
         };
       }
 
       throw new Error(
-        `Operon returned unknown decision: ${String(obj.decision)}`
+        `Operon returned unknown decision: ${String((data as { decision: unknown }).decision)}`
       );
     },
   };

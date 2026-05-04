@@ -1,4 +1,5 @@
 import { Plugin } from '@elizaos/core';
+import { OperonRetryableError } from '@operon/sdk';
 
 /** Impression context payload sent to Operon */
 interface ImpressionContext {
@@ -16,13 +17,22 @@ interface ImpressionContext {
         sentiment: string;
     };
 }
-/** ScoutScore trust result for a demand-side agent */
-interface ScoutScoreResult {
+/**
+ * Trust result for a demand-side agent.
+ *
+ * Note: the wire field is still `scoutScore` for backward compatibility with
+ * the Operon server. The TypeScript type is named `TrustScoreResult` and
+ * `PlacementDetails.scoutScore` keeps its name on the wire; user-facing copy
+ * (README, formatPlacement output) uses "Trust score".
+ */
+interface TrustScoreResult {
     domain: string;
     score: number;
     level: "HIGH" | "MEDIUM" | "LOW" | "VERY_LOW";
     flags: string[];
 }
+/** @deprecated Renamed to TrustScoreResult. Will be removed in a future major version. */
+type ScoutScoreResult = TrustScoreResult;
 /** Placement details returned when Operon fills a slot */
 interface PlacementDetails {
     sponsored: boolean;
@@ -32,7 +42,9 @@ interface PlacementDetails {
     description: string;
     routable: boolean;
     endpoint: string;
-    scoutScore: number;
+    clickUrl: string | null;
+    /** Server-side trust score (0-100). Wire field name retained for compatibility. */
+    scoutScore: number | null;
     rank: number;
     bidPrice: number;
 }
@@ -64,8 +76,28 @@ type OperonPlacementResponse = {
 interface OperonPublisherSDK {
     requestPlacement(context: ImpressionContext): Promise<OperonPlacementResponse>;
 }
-declare function createOperonPublisherSDK(operonUrl: string, apiKey: string): OperonPublisherSDK;
+interface CreateOperonPublisherSDKOptions {
+    url: string;
+    apiKey?: string;
+    publisherName?: string;
+    source?: string;
+    timeoutMs?: number;
+    /**
+     * Forwarded to @operon/sdk. Fired (fire-and-forget) when the server
+     * returns 503 + Retry-After. Use for telemetry / observability.
+     */
+    onRetryable?: (err: OperonRetryableError) => void;
+}
+/**
+ * Create a thin adapter that delegates network, identity, attribution, and
+ * circuit-breaker concerns to @operon/sdk. The adapter preserves the v0.1.x
+ * `requestPlacement(ImpressionContext)` shape so callers don't have to change.
+ *
+ * Sandbox lane: if `apiKey` is omitted, the underlying SDK runs in sandbox
+ * mode (mints a client UUID at ~/.operon/client.json, no auth required).
+ */
+declare function createOperonPublisherSDK(urlOrOptions: string | CreateOperonPublisherSDKOptions, apiKey?: string): OperonPublisherSDK;
 
 declare const operonPublisherPlugin: Plugin;
 
-export { type AuctionResult, type ImpressionContext, type OperonPlacementResponse, type OperonPublisherSDK, type PlacementDetails, type ScoutScoreResult, createOperonPublisherSDK, operonPublisherPlugin as default };
+export { type AuctionResult, type ImpressionContext, type OperonPlacementResponse, type OperonPublisherSDK, type PlacementDetails, type ScoutScoreResult, type TrustScoreResult, createOperonPublisherSDK, operonPublisherPlugin as default };

@@ -6,6 +6,7 @@ export type {
   OperonPlacementResponse,
   PlacementDetails,
   AuctionResult,
+  TrustScoreResult,
   ScoutScoreResult,
 } from "./types.js";
 export type { OperonPublisherSDK } from "./client.js";
