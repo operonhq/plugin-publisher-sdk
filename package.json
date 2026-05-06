@@ -27,7 +27,7 @@
     "@elizaos/core": "^0.1.0"
   },
   "dependencies": {
-    "@operon/sdk": "^0.1.2"
+    "@operon/sdk": "^0.1.4"
   },
   "devDependencies": {
     "@elizaos/core": "^0.1.0",
@@ -96,7 +96,13 @@
     "ai-agents",
     "ad-network",
     "operon",
-    "monetization"
+    "monetization",
+    "agent",
+    "sponsored",
+    "native-ads",
+    "eliza",
+    "placement",
+    "revenue"
   ],
   "author": "Operon (https://operon.so)",
   "license": "MIT",

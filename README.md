@@ -1,6 +1,6 @@
 # @operon/plugin-publisher-sdk
 
-ElizaOS plugin for [Operon](https://operon.so) - the protocol-level monetization layer for AI agents. Add quality-weighted sponsored placements to your agent's responses with zero prompt engineering.
+ElizaOS plugin for [Operon](https://operon.so) — the open ad network for AI agents. Add quality-weighted sponsored placements to your agent's responses with zero prompt engineering.
 
 ## How it works
 
