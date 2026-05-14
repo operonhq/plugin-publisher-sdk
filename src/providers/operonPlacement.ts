@@ -92,6 +92,14 @@ function ensureSDK(runtime: IAgentRuntime): OperonPublisherSDK | null {
     (typeof runtime.character?.name === "string" ? runtime.character.name : undefined);
   const source = getSetting(runtime, "OPERON_SOURCE") ?? undefined;
 
+  // Mirror runtime-resolved source into process.env so the SDK's
+  // resolveSource() env path picks it up. Without this, a deployment that
+  // pins OPERON_CLIENT_ID hits the persistSourceIfFirstTouch short-circuit
+  // and attribution silently disappears. See issue #4.
+  if (source && !process.env.OPERON_SOURCE) {
+    process.env.OPERON_SOURCE = source;
+  }
+
   let instance: OperonPublisherSDK;
   try {
     instance = createOperonPublisherSDK({
@@ -143,7 +151,6 @@ function getMessageText(message: Memory): string {
 
 function buildImpressionContext(
   runtime: IAgentRuntime,
-  publisherName: string,
   text: string
 ): ImpressionContext {
   const category = getSetting(runtime, "OPERON_CATEGORY", "OPERON_DEFAULT_CATEGORY") ?? "";
@@ -151,7 +158,6 @@ function buildImpressionContext(
   const asset = getSetting(runtime, "OPERON_ASSET") ?? "";
 
   return {
-    publisher: publisherName,
     slotType: "agent-response",
     requestContext: {
       query: text,
@@ -236,7 +242,12 @@ function classifyError(err: unknown): string {
  * Reliability contract: this function MUST NOT throw. Any failure path
  * returns { text: "" } so the agent responds normally.
  */
-export const operonPlacementProvider: Provider = {
+// `name` and `description` are not in @elizaos/core's `Provider` interface
+// but are read by some runtimes/tooling. Local extension type keeps `get`
+// type-checked against `Provider` while permitting the extra metadata.
+type ProviderWithMeta = Provider & { name?: string; description?: string };
+
+export const operonPlacementProvider: ProviderWithMeta = {
   name: "OPERON_PLACEMENT",
   description: "Sponsored placement from Operon ad network - injects quality-gated sponsored content into agent responses",
   get: async (
@@ -255,11 +266,9 @@ export const operonPlacementProvider: Provider = {
       const client = ensureSDK(runtime);
       if (!client) return EMPTY;
 
-      const publisherName =
-        getSetting(runtime, "OPERON_PUBLISHER_NAME") ??
-        (typeof runtime.character?.name === "string" ? runtime.character.name : "unknown");
-
-      const context = buildImpressionContext(runtime, publisherName, text);
+      // publisherName is resolved once at init in ensureSDK() and held by the
+      // SDK instance; per-message resolution would not flow through. See issue #5.
+      const context = buildImpressionContext(runtime, text);
 
       const result = await client.requestPlacement(context);
 

@@ -3,7 +3,6 @@ import { OperonRetryableError } from '@operon/sdk';
 
 /** Impression context payload sent to Operon */
 interface ImpressionContext {
-    publisher: string;
     slotType: string;
     requestContext: {
         query: string;
