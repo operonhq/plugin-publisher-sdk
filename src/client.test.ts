@@ -242,7 +242,6 @@ describe("createOperonPublisherSDK adapter", () => {
   });
 
   const dummyContext: ImpressionContext = {
-    publisher: "test-pub",
     slotType: "agent-response",
     requestContext: {
       query: "hello",

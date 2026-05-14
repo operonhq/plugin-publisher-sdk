@@ -1,6 +1,5 @@
 /** Impression context payload sent to Operon */
 export interface ImpressionContext {
-  publisher: string;
   slotType: string;
   requestContext: {
     query: string;

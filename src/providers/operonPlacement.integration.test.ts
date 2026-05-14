@@ -257,6 +257,43 @@ describe("operonPlacementProvider.get() integration", () => {
     }
   });
 
+  it("mirrors OPERON_SOURCE from runtime settings to process.env when unset (issue #4)", async () => {
+    // Save and clear process.env.OPERON_SOURCE so the mirror path is exercised.
+    const prev = process.env.OPERON_SOURCE;
+    delete process.env.OPERON_SOURCE;
+    try {
+      const runtime = makeRuntime({ OPERON_SOURCE: "marketplace-x" });
+      globalThis.fetch = mock.fn(async () => jsonResponse(filledBody())) as unknown as typeof fetch;
+
+      await operonPlacementProvider.get(runtime, message);
+
+      assert.equal(
+        process.env.OPERON_SOURCE,
+        "marketplace-x",
+        "Runtime-settings OPERON_SOURCE should be mirrored into process.env when unset"
+      );
+    } finally {
+      if (prev === undefined) delete process.env.OPERON_SOURCE;
+      else process.env.OPERON_SOURCE = prev;
+    }
+  });
+
+  it("does not overwrite an existing process.env.OPERON_SOURCE (issue #4)", async () => {
+    const prev = process.env.OPERON_SOURCE;
+    process.env.OPERON_SOURCE = "env-wins";
+    try {
+      const runtime = makeRuntime({ OPERON_SOURCE: "settings-loses" });
+      globalThis.fetch = mock.fn(async () => jsonResponse(filledBody())) as unknown as typeof fetch;
+
+      await operonPlacementProvider.get(runtime, message);
+
+      assert.equal(process.env.OPERON_SOURCE, "env-wins");
+    } finally {
+      if (prev === undefined) delete process.env.OPERON_SOURCE;
+      else process.env.OPERON_SOURCE = prev;
+    }
+  });
+
   it("legacy setting names still work (OPERON_DEFAULT_CATEGORY, OPERON_DEFAULT_INTENT)", async () => {
     const runtime = makeRuntime({
       OPERON_DEFAULT_CATEGORY: "gaming",

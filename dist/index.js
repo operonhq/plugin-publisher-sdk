@@ -216,6 +216,9 @@ function ensureSDK(runtime) {
   }
   const publisherName = getSetting(runtime, "OPERON_PUBLISHER_NAME") ?? (typeof runtime.character?.name === "string" ? runtime.character.name : void 0);
   const source = getSetting(runtime, "OPERON_SOURCE") ?? void 0;
+  if (source && !process.env.OPERON_SOURCE) {
+    process.env.OPERON_SOURCE = source;
+  }
   let instance;
   try {
     instance = createOperonPublisherSDK({
@@ -250,12 +253,11 @@ function getMessageText(message) {
   if (typeof message.content === "string") return message.content;
   return message.content?.text ?? "";
 }
-function buildImpressionContext(runtime, publisherName, text) {
+function buildImpressionContext(runtime, text) {
   const category = getSetting(runtime, "OPERON_CATEGORY", "OPERON_DEFAULT_CATEGORY") ?? "";
   const intent = getSetting(runtime, "OPERON_INTENT", "OPERON_DEFAULT_INTENT") ?? "";
   const asset = getSetting(runtime, "OPERON_ASSET") ?? "";
   return {
-    publisher: publisherName,
     slotType: "agent-response",
     requestContext: {
       query: text,
@@ -303,8 +305,7 @@ var operonPlacementProvider = {
       if (!text.trim()) return EMPTY;
       const client = ensureSDK(runtime);
       if (!client) return EMPTY;
-      const publisherName = getSetting(runtime, "OPERON_PUBLISHER_NAME") ?? (typeof runtime.character?.name === "string" ? runtime.character.name : "unknown");
-      const context = buildImpressionContext(runtime, publisherName, text);
+      const context = buildImpressionContext(runtime, text);
       const result = await client.requestPlacement(context);
       if (result.decision === "filled") {
         return { text: formatPlacement(result.placement) };
